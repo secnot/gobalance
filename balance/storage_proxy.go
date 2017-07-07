@@ -102,22 +102,92 @@ func (s *StorageProxyCache) Get(address string) (balance int64, err error) {
 // Update address balance (doesn't commit changes to storage)
 func (s *StorageProxyCache) Update(address string, ammount int64) {
 	s.Lock()
-	s.pending[address] += ammount
+	if ammount != 0 {
+		s.pending[address] += ammount
+		if s.pending[address] == {
+			delete(s.pending, address)
+		}
+	}
 	s.Unlock()
 }
 
 // Commit pending updates to storage
 func (s *StorageProxyCache) Commit() (err error){
 
-	// Retrieve Balance for all pending updates
-	c.Lock()
-	c.cache.Resize(s.cache_size+len(s.pending))
+	var err error = nil
+	s.Lock()
 
-	for address := range s.pending() {
-		storedBalance, ok := s.cache.Peek(address)
+
+	// TODO: Load all missig 
+	var misses []string // Address not cached that need to be loaded from storage
+	for address, update := range s.pending() {
+		balance, ok := s.cache.Peek(address)
+		if !ok {
+			// address isn't cached
+			misses.append(address)
+			continue
+		}
 	}
-	var balance []AddressBalancePair
-	c.Unlock
+	
+	queried, err := storage.BulkGet(misses)
+	if err != nil {
+		s.Unlock()
+		return err
+	}
+
+	// Add enough space to cache for all the missing balances
+	s.cache.Resize(s.cache_size+len(misses), s.cache_size/100+1)
+	for kbpair := range queried {
+		s.cache.Set(kbpair.address, kbpair.balance)
+	}
+
+	// Split pending updates into updates/inserts/deletions
+	var update []AddressBalancePair
+	var insert []AddressBalancePair
+	var remove []string
+	for address, update := range s.pending {
+		balance, _ := s.cache.Get(address) // All pending balance should be cached
+		if balance + update < 0 {
+			errMsg := fmt.Sprintf("%v balance is %v", address, balance+update)
+			err = NewErrorNegativeBalance(errorMsg)
+			break
+		}
+		
+		if balance == 0 {
+			// INSERT
+			insert.append(AddressBalancePair{address, update})
+		} else if balance + update == 0 {
+			// DELETE
+			remove.append(address)
+		} else {
+			// UPDATE
+			update.append(AddressBalancePair{address, balance+update})
+		}
+	}
+
+	// Return cache to its original size
+	s.cache.Resize(s.cache_size, s.cache_size/100+1)
+	if err != nil { // Negative balance error
+		s.Unlock()
+		return err
+	}
+	
+	// Update storage
+	err = s.storage.BulkUpdate(insert, update, remove, s.height)
+	if err == nil {
+		// Update cached balances
+		for address, update := range s.pending {
+			if balance, ok := s.cache.Peek(address); ok {
+				s.cache.Set(address, balance.(int64) + update)
+			}
+		}
+
+		// Clear pending updates
+		s.pending = make(map[string]int64)
+	}
+
+	c.Unlock()
+	return err
 }
 
 
