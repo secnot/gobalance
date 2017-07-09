@@ -2,6 +2,7 @@ package balance
 
 import (
 	"fmt"
+	"time"
 	"testing"
 )
 
@@ -309,9 +310,10 @@ func TestStorageProxyNegativeBalanceDetection(t *testing.T) {
 	}
 }
 
-// TODO: Test concurrent Get requests
+// Test concurrent Get/Update/commit
 func TestStorageProxyConcurrentGet(t *testing.T) {
 	storage := NewMemoryStorage()
+	storageInit(storage, 1000, 554234)
 	cache := NewStorageProxyCache(storage, 10000)
 	balance, err := cache.Get("qwerty")
 	
@@ -319,6 +321,38 @@ func TestStorageProxyConcurrentGet(t *testing.T) {
 		t.Error(balance, err)
 	}
 
-	// TODO: Retrieve concurrently the same address by 1000 routines
+	updateFunc := func (cache *StorageProxyCache, address string, balance int64, delay int) {
+		time.Sleep(time.Duration(delay)*time.Millisecond)
+		cache.Update(address, balance)
+	}
 
+	getFunc := func (cache *StorageProxyCache, address string, delay int) {
+		time.Sleep(time.Duration(delay)*time.Millisecond)
+		cache.Get(address)
+	}
+
+	commitFunc := func (cache *StorageProxyCache, delay int) {
+		time.Sleep(time.Duration(delay)*time.Millisecond)
+		cache.Commit()
+	}
+
+	// 
+	for i := int64(0); i < 1000; i++ {
+		go updateFunc(cache, "one_address", 1, int(i%10))
+		go getFunc(cache, "one_address", int(i%11))
+		go updateFunc(cache, "one_address", 1, int(i%11))
+		go getFunc(cache, "one_address", int(i%13))
+		go updateFunc(cache, "two_address", 1, int(i%7))
+		if i%3 == 0 {
+			go commitFunc(cache, 1)
+		}
+	}
+
+	// Wait until all updates and commits are finished
+	time.Sleep(300*time.Millisecond)
+	cache.Commit()
+	storageHasBalance(t, storage, "one_address", 2000)
+	cacheHasBalance(t, cache, "one_address", 2000)
+	storageHasBalance(t, storage, "two_address", 1000)
+	cacheHasBalance(t, cache, "two_address", 1000)
 }
