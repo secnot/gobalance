@@ -42,7 +42,11 @@ func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache
 		return balance, true
 	}
 
-	// TODO: Initialize height from storage
+	height, err := storage.GetHeight()
+	if err != nil {
+		return nil
+	}
+
 	cache := simplelru.NewFetchingLRUCache(
 		cache_size,
 		cache_size/100+1, // pruneSize
@@ -55,14 +59,14 @@ func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache
 		pending: make(map[string]int64),
 		cache_size: cache_size,
 		storage: storage,
-		height: 0,
+		height: height,
 	}
 
 	return proxy
 }
 
 // GetHeight
-func (s *StorageProxyCache) GetHeight() (height uint64, err error) {
+func (s *StorageProxyCache) GetHeight() (height int64, err error) {
 	s.RLock()
 	height, err = s.height, nil
 	s.RUnlock()
@@ -70,7 +74,7 @@ func (s *StorageProxyCache) GetHeight() (height uint64, err error) {
 }
 
 // SetHeight
-func (s *StorageProxyCache) SetHeight(height uint64) {
+func (s *StorageProxyCache) SetHeight(height int64) {
 	s.Lock()
 	s.height = height
 	s.Unlock()
@@ -85,13 +89,13 @@ func (s *StorageProxyCache) Get(address string) (balance int64, err error) {
 	storedBalance, ok := s.cache.Get(address) 
 	if !ok {
 		//There was an error while fetching the balance from storage
-		return 0, NewErrorStorage("Unable to access storage")
+		return 0, NewStorageError("Unable to access storage")
 	}
 		
 	// Add pending updates and return...
 	balance = storedBalance.(int64) + s.pending[address]
 	if balance < 0 {
-		err = NewErrorNegativeBalance(fmt.Sprintf("%v balance is %v", address, balance))
+		err = NewNegativeBalanceError(fmt.Sprintf("%v balance is %v", address, balance))
 	} else {
 		err = nil
 	}
@@ -100,11 +104,11 @@ func (s *StorageProxyCache) Get(address string) (balance int64, err error) {
 }
 
 // Update address balance (doesn't commit changes to storage)
-func (s *StorageProxyCache) Update(address string, ammount int64) {
+func (s *StorageProxyCache) Update(address string, amount int64) {
 	s.Lock()
-	if ammount != 0 {
-		s.pending[address] += ammount
-		if s.pending[address] == {
+	if amount != 0 {
+		s.pending[address] += amount
+		if s.pending[address] == 0 {
 			delete(s.pending, address)
 		}
 	}
@@ -114,59 +118,58 @@ func (s *StorageProxyCache) Update(address string, ammount int64) {
 // Commit pending updates to storage
 func (s *StorageProxyCache) Commit() (err error){
 
-	var err error = nil
 	s.Lock()
 
 
-	// TODO: Load all missig 
-	var misses []string // Address not cached that need to be loaded from storage
-	for address, update := range s.pending() {
-		balance, ok := s.cache.Peek(address)
-		if !ok {
-			// address isn't cached
-			misses.append(address)
-			continue
+	// Find all pending updates whose balance is not cached
+	var missing []string
+	for address, _ := range s.pending {
+		if !s.cache.Contains(address) {
+			missing = append(missing, address)
 		}
 	}
 	
-	queried, err := storage.BulkGet(misses)
+	missingBalance, err := s.storage.BulkGet(missing)
 	if err != nil {
 		s.Unlock()
 		return err
 	}
 
 	// Add enough space to cache for all the missing balances
-	s.cache.Resize(s.cache_size+len(misses), s.cache_size/100+1)
-	for kbpair := range queried {
-		s.cache.Set(kbpair.address, kbpair.balance)
+	s.cache.Resize(s.cache_size+len(missing), s.cache_size/100+1)
+	for n, address := range missing {
+		s.cache.Set(address, missingBalance[n])
 	}
 
-	// Split pending updates into updates/inserts/deletions
+	// Split pending into updates/inserts/deletions
 	var update []AddressBalancePair
 	var insert []AddressBalancePair
 	var remove []string
-	for address, update := range s.pending {
-		balance, _ := s.cache.Get(address) // All pending balance should be cached
-		if balance + update < 0 {
-			errMsg := fmt.Sprintf("%v balance is %v", address, balance+update)
-			err = NewErrorNegativeBalance(errorMsg)
+	for address, amount := range s.pending {
+		ibalance, _ := s.cache.Get(address) // All should be cached
+		balance := ibalance.(int64)
+		if balance + amount < 0 {
+			errMsg := fmt.Sprintf("Commit(): \"%v\" balance is negative (%v)", 
+				address, balance+amount)
+			err = NewNegativeBalanceError(errMsg)
 			break
 		}
 		
 		if balance == 0 {
 			// INSERT
-			insert.append(AddressBalancePair{address, update})
-		} else if balance + update == 0 {
+			insert = append(insert, AddressBalancePair{address, amount})
+		} else if balance + amount == 0 {
 			// DELETE
-			remove.append(address)
+			remove = append(remove, address)
 		} else {
 			// UPDATE
-			update.append(AddressBalancePair{address, balance+update})
+			update = append(update, AddressBalancePair{address, balance+amount})
 		}
 	}
 
 	// Return cache to its original size
 	s.cache.Resize(s.cache_size, s.cache_size/100+1)
+	//TODO: Remove from cache missing address added instead of the oldest
 	if err != nil { // Negative balance error
 		s.Unlock()
 		return err
@@ -186,28 +189,57 @@ func (s *StorageProxyCache) Commit() (err error){
 		s.pending = make(map[string]int64)
 	}
 
-	c.Unlock()
+	s.Unlock()
 	return err
 }
 
+// UncommitedLen returns the number of updates not yet commited
+func (s *StorageProxyCache) UncommittedLen() (length int) {
+	s.RLock()
+	length = len(s.pending)
+	s.RUnlock()
+	return
+}
 
-/*
+// Len returns the number or stored balances
+func (s *StorageProxyCache) Len() (length int, err error) {
+	s.RLock()
+	length, err = s.storage.Len()
+	s.RUnlock()
+	return
+}
+
+
+
 // Clear balance cache
-func (s *StorageProxyCache) ClearCache() {
+func (s *StorageProxyCache) CacheClear() {
+	s.Lock()
+	s.cache.Purge()
+	s.Unlock()
+}
+
+// Elements stored by balance cache
+func (s *StorageProxyCache) CacheLen() (length int){
+	s.RLock()
+	length = s.cache.Len()
+	s.RUnlock()
+	return
 }
 
 
-// Return cached address balance or fail, also fail if the balance is a negative number
-func (s *StorageProxyCache) cachedBalance(address string) (balance uint64, err error){
-	// No lock here
-	
+// GetCacheStats return hit/miss count for balance cache
+func (s *StorageProxyCache) GetStats() (hit uint64, miss uint64) {
+	s.RLock()
+	hit, miss = s.cache.Stats()
+	s.RUnlock()
+	return
 }
 
-//
-func (s *StorageProxyCache) UncommitedLen() {
+// ResetStats initialize stats to 0 hits / 0 miss 
+func (s *StorageProxyCache) ResetStats() {
+	s.Lock()
+	s.cache.ResetStats()
+	s.Unlock()
 }
 
-// 
-func (s *StorageProxyCache) Len() {
-}
-*/
+

@@ -42,34 +42,33 @@ type AddressBalancePair struct {
 }
 
 
-
-type ErrorStorage struct {
-	message string
+type StorageError struct {
+	Message string
 }
 
-func NewErrorStorage(message string) *ErrorStorage {
-	return &ErrorStorage{
-		message: message,
+func NewStorageError(message string) *StorageError {
+	return &StorageError{
+		Message: message,
 	}
 }
 
-func (e *ErrorStorage) Error() string {
-	return e.message
+func (e StorageError) Error() string {
+	return e.Message
 }
 
 
 
 // Operations would result in a negative balance
-type ErrorNegativeBalance struct {
-	message string
+type NegativeBalanceError struct {
+	Message string
 }
 
-func NewErrorNegativeBalance(message string) *ErrorNegativeBalance {
-	return &ErrorNegativeBalance{
-		message: message,
+func NewNegativeBalanceError(message string) *NegativeBalanceError {
+	return &NegativeBalanceError{
+		Message: message,
 	}
 }
 
-func (e *ErrorNegativeBalance) Error() string {
-	return e.message
+func (e NegativeBalanceError) Error() string {
+	return e.Message
 }
