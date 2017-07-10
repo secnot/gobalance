@@ -88,6 +88,14 @@ func cacheHasStats(t *testing.T, cache *StorageProxyCache, hit uint64, miss uint
 	}
 }
 
+func cacheHasCacheLen(t *testing.T, cache *StorageProxyCache, size int) {
+	if cache.CacheLen() != size {
+		errMsg := fmt.Sprintf("Cache should contain %v items not %v",
+			size, cache.CacheLen())
+		t.Error(errMsg)
+	}
+}
+
 // Verify cache size
 func cacheHasSize(t *testing.T, cache *StorageProxyCache, cacheSize int) {
 
@@ -179,7 +187,6 @@ func TestNewStorageProxy(t *testing.T) {
 	cacheHasBalance(t, cache, "address_0", 0)
 	cacheHasBalance(t, cache, "address_1", 0)
 }
-
 
 
 // Test Balance Detection
@@ -351,6 +358,44 @@ func TestStorageProxyCacheSize(t *testing.T) {
 	
 	cacheHasSize(t, cache, cacheSize)
 }
+
+
+// Test committing doesn't alter the cache
+func TestStorageProxyCommitCache(t *testing.T) {
+	storage := NewMemoryStorage()
+	storageInit(storage, 1000, 77777)
+	cache, _ := NewStorageProxyCache(storage, 500)
+
+	// Fill cache with stored values
+	for i := 100; i < 600; i++ {
+		address := fmt.Sprintf("address_%v", i)
+		cache.Get(address)
+	}
+	cacheHasStats(t, cache, 0, 500)
+
+	for i := 100; i < 600; i++ {
+		address := fmt.Sprintf("address_%v", i)
+		cacheHasBalance(t, cache, address, int64(i))
+	}
+	cacheHasStats(t, cache, 500, 500)
+	cacheHasCacheLen(t, cache, 500)
+
+	// Add updates for non stored addresses and commit
+	cache.Update("new_address_1", 1)
+	cache.Update("new_address_2", 2)
+	cache.Update("new_address_3", 3)
+	cache.Commit()
+
+	// Check the cache was left unchanged
+	cacheHasStats(t, cache, 500, 500)	
+	cacheHasCacheLen(t, cache, 500)
+	for i := 100; i < 600; i++ {
+		address := fmt.Sprintf("address_%v", i)
+		cache.Get(address)
+	}
+	cacheHasStats(t, cache, 1000, 500)
+}
+
 
 // Test CacheLen method
 func TestStorageProxyCacheLen(t *testing.T) {	

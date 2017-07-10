@@ -134,8 +134,8 @@ func (s *StorageProxyCache) Commit() (err error){
 		return err
 	}
 
-	// Add enough space to cache for all the missing balances
-	s.cache.Resize(s.cache_size+len(missing), s.cache_size/100+1)
+	// Resize cache to fit all the missing balances without pruning
+	s.cache.Resize(s.cache_size+len(missing)+1, s.cache_size/100+1)
 	for n, address := range missing {
 		s.cache.Set(address, missingBalance[n])
 	}
@@ -145,7 +145,7 @@ func (s *StorageProxyCache) Commit() (err error){
 	var insert []AddressBalancePair
 	var remove []string
 	for address, amount := range s.pending {
-		ibalance, _ := s.cache.Get(address) // All should be cached
+		ibalance, _ := s.cache.Peek(address) // All should be cached
 		balance := ibalance.(int64)
 		if balance + amount < 0 {
 			errMsg := fmt.Sprintf("Commit(): \"%v\" balance is negative (%v)", 
@@ -166,9 +166,12 @@ func (s *StorageProxyCache) Commit() (err error){
 		}
 	}
 
-	// Return cache to its original size
+	// Remove missing addressed added to cache and return cache to original size
+	for _, _ = range missing {
+		s.cache.RemoveNewest()
+	}
 	s.cache.Resize(s.cache_size, s.cache_size/100+1)
-	//TODO: Remove from cache missing address added instead of the oldest
+	
 	if err != nil { // Negative balance error
 		s.Unlock()
 		return err
@@ -208,8 +211,6 @@ func (s *StorageProxyCache) Len() (length int, err error) {
 	return
 }
 
-
-
 // Clear balance cache
 func (s *StorageProxyCache) CacheClear() {
 	s.Lock()
@@ -224,7 +225,6 @@ func (s *StorageProxyCache) CacheLen() (length int){
 	s.RUnlock()
 	return
 }
-
 
 // GetCacheStats return hit/miss count for balance cache
 func (s *StorageProxyCache) GetStats() (hit uint64, miss uint64) {
