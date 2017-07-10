@@ -1,4 +1,4 @@
-package balance
+package storage
 
 import (
 	"fmt"
@@ -126,7 +126,11 @@ func cacheHasSize(t *testing.T, cache *StorageProxyCache, cacheSize int) {
 func TestNewStorageProxyInit(t *testing.T) {
 	storage := NewMemoryStorage()
 	storageInit(storage, 1000, 12) // Preload storage
-	cache := NewStorageProxyCache(storage, 100)
+	cache, err := NewStorageProxyCache(storage, 100)
+	if err != nil {
+		t.Error("StorageProxyCache creation error")
+		return
+	}
 
 	// Check there are 0 uncommited updates after creation
 	cacheHasUncommittedLen(t, cache, 0)
@@ -153,8 +157,12 @@ func TestNewStorageProxyInit(t *testing.T) {
 // Test NewStorageProxy with uninitialized storage
 func TestNewStorageProxy(t *testing.T) {
 	storage := NewMemoryStorage()
-	cache := NewStorageProxyCache(storage, 10000)
-	
+	cache, err := NewStorageProxyCache(storage, 10000)
+	if err != nil {
+		t.Error("StorageProxyCache creation error")
+		return
+	}
+
 	// Check there are 0 uncommited updates after creation
 	cacheHasUncommittedLen(t, cache, 0)
 
@@ -173,14 +181,88 @@ func TestNewStorageProxy(t *testing.T) {
 }
 
 
+
+// Test Balance Detection
+func TestStorageProxyNegativeBalanceDetection(t *testing.T) {	
+	storage := NewMemoryStorage()
+	cache, _ := NewStorageProxyCache(storage, 1000)
+
+	// Check NegativeBalanceError is returned when required
+	cache.SetHeight(10)
+	cache.Update("address", 10)
+	cache.Commit()
+
+	storageHasBalance(t, storage, "address", 10)
+	cacheHasBalance(t, cache, "address", 10)
+
+	// Update to negative and try to GET
+	cache.Update("address", -20)
+	balance, err := cache.Get("address")
+	if err == nil {
+		t.Error("'Getting' a negative balance should return an error")
+	}
+	
+	switch err.(type) {
+		case NegativeBalanceError, *NegativeBalanceError:
+			return
+		default:
+			t.Error("Didn't return expected NegativeBalanceError")
+	}
+
+	// Even returning an error balance should contain the balance
+	if balance != -10 {
+		t.Error("Returned unexpected balance")
+	}
+
+	// Committing should also generate a NegativeBalanceError
+	cache.Commit()
+
+	if err = cache.Commit(); err == nil {
+		t.Error("Committing a negative balance should have returned and error")
+	} else {
+		switch err.(type) {
+			case NegativeBalanceError, *NegativeBalanceError:
+				return
+			default:
+				t.Error("Didn't return expected NegativeBalanceError")
+		}
+	}
+
+}
+
+
+// Test remainig negative balance detection code
+func TestStorageProxyNegativeBalanceDetection2(t *testing.T) {	
+	storage := NewMemoryStorage()
+	cache, _ := NewStorageProxyCache(storage, 100)
+
+	cache.Update("new_address", 34)
+	cache.Commit()
+
+	cache.Update("new_address", -44)
+	if err := cache.Commit(); err == nil {
+		t.Error("Committing a negative should have returned and error")
+	} else {
+		switch err.(type) {
+			case NegativeBalanceError, *NegativeBalanceError:
+				return
+			default:
+				t.Error("Didn't return expected NegativeBalanceError")
+		}
+	}
+}
+
+
+
+
 // Test update
 func TestStorageProxyUpdate(t *testing.T) {
 
 	// Test updates are committed to storage
 	////////////////////////////////////////
 	storage := NewMemoryStorage()
-	cache := NewStorageProxyCache(storage, 10000)
-
+	cache, _ := NewStorageProxyCache(storage, 10000)
+	
 	cache.SetHeight(50)
 	cache.Update("secret", 999)
 	cacheHasBalance(t, cache, "secret", 999)
@@ -199,7 +281,8 @@ func TestStorageProxyUpdate(t *testing.T) {
 
 	// Reuse initialized storage for a new cache
 	/////////////////////////////////////////////
-	cache = NewStorageProxyCache(storage, 10000)
+	cache, _ = NewStorageProxyCache(storage, 10000)
+
 	cacheHasHeight(t, cache, 50)
 	cacheHasBalance(t, cache, "secret", 999)
 	cacheHasLen(t, cache, 1)
@@ -208,7 +291,7 @@ func TestStorageProxyUpdate(t *testing.T) {
 	// Test adresses with 0 balance are deleted from storage
 	////////////////////////////////////////////////////////
 	storage = NewMemoryStorage()
-	cache = NewStorageProxyCache(storage, 10000)
+	cache, _ = NewStorageProxyCache(storage, 10000)
 
 	cache.SetHeight(33)
 	cache.Update("an_address", 66)
@@ -225,7 +308,8 @@ func TestStorageProxyUpdate(t *testing.T) {
 	// Test 0 updates are discarded
 	///////////////////////////////////////
 	storage = NewMemoryStorage()
-	cache = NewStorageProxyCache(storage, 10000)
+	cache, _ = NewStorageProxyCache(storage, 10000)
+
 	cache.SetHeight(100)
 
 	// Add a new update
@@ -249,7 +333,7 @@ func TestStorageProxyCacheSize(t *testing.T) {
 	storage := NewMemoryStorage()
 	cacheSize := 1000
 	storageInit(storage, cacheSize, 477777)
-	cache := NewStorageProxyCache(storage, cacheSize)
+	cache, _ := NewStorageProxyCache(storage, cacheSize)
 
 	// Original cache max size before commit
 	cacheHasSize(t, cache, cacheSize)
@@ -273,7 +357,7 @@ func TestStorageProxyCacheLen(t *testing.T) {
 	storage := NewMemoryStorage()
 	cacheSize := 1000
 	storageInit(storage, cacheSize, 477777)
-	cache := NewStorageProxyCache(storage, cacheSize)
+	cache, _ := NewStorageProxyCache(storage, cacheSize)
 	
 	if cache.CacheLen() != 0 {
 		t.Error("An empty cache lenght should be 0")
@@ -289,32 +373,12 @@ func TestStorageProxyCacheLen(t *testing.T) {
 
 }
 
-// Test negative balance detection
-func TestStorageProxyNegativeBalanceDetection(t *testing.T) {	
-	storage := NewMemoryStorage()
-	cache := NewStorageProxyCache(storage, 100)
-
-	cache.Update("new_address", 34)
-	cache.Commit()
-
-	cache.Update("new_address", -44)
-	if err := cache.Commit(); err == nil {
-		t.Error("Committing a negative should have returned and error")
-	} else {
-		switch err.(type) {
-			case NegativeBalanceError, *NegativeBalanceError:
-				return
-			default:
-				t.Error("Didn't return expected NegativeBalanceError")
-		}
-	}
-}
 
 // Test concurrent Get/Update/commit
 func TestStorageProxyConcurrentGet(t *testing.T) {
 	storage := NewMemoryStorage()
 	storageInit(storage, 1000, 554234)
-	cache := NewStorageProxyCache(storage, 10000)
+	cache, _ := NewStorageProxyCache(storage, 10000)
 	balance, err := cache.Get("qwerty")
 	
 	if err != nil {

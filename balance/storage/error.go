@@ -1,4 +1,4 @@
-package balance
+package storage
 
 
 // StorageError returned when it wasn't possible to read/write to storage

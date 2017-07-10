@@ -1,4 +1,4 @@
-package balance
+package storage
 
 import(
 	"testing"
@@ -220,6 +220,19 @@ func testStorageInterfaceBulkUpdate(t *testing.T, storage Storage) {
 }
 
 
+// Test BulkUPdating and address to 0 is the same as a deletion
+func testStorageInterfaceBulkUpdateDelete(t *testing.T, storage Storage) {
+
+	storage.Set("address", 14)
+	storageContains(t, storage, "address", 14)
+
+	update := []AddressBalancePair{{Address: "address", Balance: 0}}
+	storage.BulkUpdate(nil, update, nil, 7777)
+
+	storageNotContains(t, storage, "address")
+}
+
+
 // Test concurrent Set/Get
 func testStorageInterfaceConcurrency(t *testing.T, storage Storage) {
 
@@ -283,6 +296,12 @@ func TestMemoryStorageBulkGet(t *testing.T) {
 func TestMemoryStorageBulkUpdate(t *testing.T) {
 	storage := NewMemoryStorage()
 	testStorageInterfaceBulkUpdate(t, storage)
+}
+
+// Test Bulk update to 0 is the same as deletion
+func TestMemoryStorageBulkUpdateDelete(t *testing.T) {
+	storage := NewMemoryStorage()
+	testStorageInterfaceBulkUpdateDelete(t, storage)
 }
 
 // Test memory storage concurrency

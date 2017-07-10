@@ -1,4 +1,4 @@
-package balance
+package storage
 
 
 // Memory and SQL storage interface:

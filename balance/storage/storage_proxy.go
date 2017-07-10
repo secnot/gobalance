@@ -1,10 +1,9 @@
-package balance
+package storage
 
 import (
 	"sync"
 	"fmt"
 	"github.com/secnot/simplelru"
-	_ "github.com/secnot/orderedmap"
 )
 
 
@@ -30,7 +29,7 @@ type StorageProxyCache struct {
 
 
 //
-func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache) {
+func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache, err error) {
 	
 	// Create a new 
 	fetchFunc := func (address interface{}) (balance interface{}, ok bool) {
@@ -44,7 +43,7 @@ func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache
 
 	height, err := storage.GetHeight()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	cache := simplelru.NewFetchingLRUCache(
@@ -62,7 +61,7 @@ func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache
 		height: height,
 	}
 
-	return proxy
+	return proxy, nil
 }
 
 // GetHeight
