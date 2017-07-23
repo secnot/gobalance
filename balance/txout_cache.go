@@ -99,3 +99,6 @@ func (t *TxOutPool) AddBlock(block *wire.MsgBlock) {
 		t.AddTx(tx)
 	}
 }
+
+
+func BlockFactory()

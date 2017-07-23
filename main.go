@@ -6,36 +6,14 @@ package main
 
 import (
 	"log"
-	"fmt"
-	_ "github.com/secnot/simplelru"
-	"github.com/btcsuite/btcrpcclient"
-	"./balance"
 	"time"
-	//"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcrpcclient"
+	"github.com/secnot/gobalance/crawler"
+	"github.com/btcsuite/btcd/chaincfg"
+
+	"github.com/secnot/gobalance/primitives"
 )
 
-
-
-//build_block(block *wire.MsgBlock)
-
-/*
-type BlockPrefetchCache struct {
-
-	cache []*wire.MsgBlock
-	size int
-	
-	lock
-}
-
-*/
-/*
-func NewBlockPrefetchCache(conConfig btcrpcclient.ConnConfig, size int) *BlockPrefetchCache{
-	return
-}
-
-func (* BlockPrefetchCache) get_next_block() (*wire.MsgBlock, error){
-}
-*/
 
 
 
@@ -45,6 +23,7 @@ func main() {
 		Host:         "localhost:8332",
 		User:         "secnot",
 		Pass:         "12345",
+		DisableAutoReconnect: false,
 		HTTPPostMode: true, // Bitcoin core only supports HTTP POST mode
 		DisableTLS:   true, // Bitcoin core does not provide TLS by default
 	}
@@ -54,38 +33,22 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer client.Shutdown()
+	//defer client.Shutdown()
 
-	// Get the current block count.
-	blockCount, err := client.GetBlockCount()
-	if err != nil {
-		log.Fatal(err)
+
+	primitives.SelectChain(&chaincfg.MainNetParams)
+//	craw := crawler.NewCrawler(client, 476800)
+
+//	craw := crawler.NewCrawler(client, 140930)
+	craw := crawler.NewCrawler(client, 0)
+	confirmed := crawler.NewConfirmedAdapter(6)
+	craw.Subscribe(confirmed)
+	confirmed.Subscribe(crawler.NewLogger())
+	craw.Start()
+
+	// TODO: Subscribe balance and other services
+	for {
+		time.Sleep(10000*time.Second)
 	}
-
-	log.Printf("Block count: %d", blockCount)
-
-
-	// Initialize txpool
-	pool := balance.NewTxOutPool()	
-
-	// Get blocks from start to finish
-	for i:= int64(0); i<blockCount; i+=1 {
-		blockHash, err := client.GetBlockHash(i)
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-		block, err := client.GetBlock(blockHash)
-		if err != nil {
-			log.Fatal(err)
-			return
-		}
-		// block -> *wire.MsgBlock
-		//fmt.Printf("Block %d: %v\n", i, block.Hash, block)
-		fmt.Printf("Block %d: %v\n", i, block.BlockHash())
-		pool.AddBlock(block)
-	}
-	time.Sleep(10000*time.Second)
 }
 
-//class, address, sigs, err := txscript.ExtractPkScriptAddrs

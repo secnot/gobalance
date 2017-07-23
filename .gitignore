@@ -21,3 +21,6 @@
 
 # Ignore sqlite db
 *.db
+
+# Ignore vendor packages
+vendor/
