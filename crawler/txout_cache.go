@@ -109,8 +109,7 @@ func newRPCTxFetchFunc(client *btcrpcclient.Client) simplelru.FetchFunc {
 			}
 
 			// Return decoded transaction record
-			panic("Miss\n")
-			return NewTxRecord(&hash, tx.MsgTx()), true
+			return NewTxRecord(tx.MsgTx()), true
 		}	
 		return nil, false
 	}
@@ -160,12 +159,10 @@ func (t *TxOutCache) getTxOut(txHash *chainhash.Hash, nOut uint32, peek bool) (*
 		// happen, but just in case discard the record and retrieve the full 
 		// transaction again.
 		t.cache.Remove(*txHash)
-		panic("Here I am\n")
 		return t.getTxOut(txHash, nOut, peek)
 	}
 
-	// If it is only a peek the TxOut is not deleted from cache, otherwise delete
-	// the txout and the tx if it is empty
+	// If it isn't a peek delete the txout and also the transaction it's empty
 	if !peek {
 		record.Outputs[nOut] = nil
 		record.unspent--
@@ -189,7 +186,7 @@ func (t *TxOutCache) PeekTxOut(txHash *chainhash.Hash, nOut uint32) (*primitives
 
 // Add transaction outputs and remove transactions inputs to and from the pool
 func (t *TxOutCache) SetTx(txHash *chainhash.Hash, tx *wire.MsgTx) error {
-	t.cache.Set(*txHash, NewTxRecord(txHash, tx))
+	t.cache.Set(*txHash, NewTxRecord(tx))
 	return nil
 }
 

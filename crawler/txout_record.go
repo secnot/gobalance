@@ -5,14 +5,11 @@ package crawler
 import (
 	"fmt"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/secnot/gobalance/primitives"
 )
 
 // 
 type TxRecord struct {
-	TxHash  chainhash.Hash //TODO: Is this required???????????
-	//<--------------
 	Outputs []*TxRecordOut
 	unspent uint32// number of unspent outputs remainnig in the record
 }
@@ -24,7 +21,7 @@ type TxRecordOut struct {
 }
 
 // NewTxRecord constructs  a TxRecord from raw wire transaction
-func NewTxRecord(hash *chainhash.Hash, tx *wire.MsgTx) *TxRecord {
+func NewTxRecord(tx *wire.MsgTx) *TxRecord {
 	
 	outputs := make([]*TxRecordOut, 0, len(tx.TxOut))
 	unspent := uint32(0)
@@ -38,7 +35,6 @@ func NewTxRecord(hash *chainhash.Hash, tx *wire.MsgTx) *TxRecord {
 	}
 
 	return &TxRecord{
-		TxHash:  *hash,
 		Outputs: outputs,
 		unspent: unspent,
 	}

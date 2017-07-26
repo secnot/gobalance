@@ -8,9 +8,11 @@ import (
 	"log"
 	"time"
 	"github.com/btcsuite/btcrpcclient"
-	"github.com/secnot/gobalance/crawler"
 	"github.com/btcsuite/btcd/chaincfg"
 
+	"github.com/secnot/gobalance/crawler"
+	"github.com/secnot/gobalance/balance"
+	"github.com/secnot/gobalance/balance/storage"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -37,14 +39,17 @@ func main() {
 
 
 	primitives.SelectChain(&chaincfg.MainNetParams)
-//	craw := crawler.NewCrawler(client, 476800)
+	blockCrawler := crawler.NewCrawler(client, 0)
 
-//	craw := crawler.NewCrawler(client, 140930)
-	craw := crawler.NewCrawler(client, 0)
-	confirmed := crawler.NewConfirmedAdapter(6)
-	craw.Subscribe(confirmed)
-	confirmed.Subscribe(crawler.NewLogger())
-	craw.Start()
+	// Balance
+	memStorage := storage.NewMemoryStorage()
+	balanceProc := balance.NewBalanceProcessor(memStorage, 200000) // cachesize
+	blockCrawler.Subscribe(balanceProc)
+
+	// Logging
+	//blockCrawler.Subscribe(crawler.NewLogger())
+
+	blockCrawler.Start()
 
 	// TODO: Subscribe balance and other services
 	for {
