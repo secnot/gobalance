@@ -2,14 +2,11 @@ package crawler
 
 
 import (
-	"fmt"
-	"time"
+	"log"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	//"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcrpcclient"
-	"github.com/secnot/simplelru"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -81,85 +78,35 @@ func (e *ErrInvalidTx) Error() string {
 // Unspent transaction output pool
 type TxOutCache struct {
 	//TODO: Substitute simplelru with a more efficient storage method
-	cache *simplelru.LRUCache
+	cache map[chainhash.Hash]TxRecord
 	rpc  *btcrpcclient.Client
 }
 
-//
-func newRPCTxFetchFunc(client *btcrpcclient.Client) simplelru.FetchFunc {
-
-	fetchFunc := func(key interface{}) (value interface{}, ok bool) {
-		retryCount := 0 // Number of retries used for the current
-		RETRY:
-		for {
-			hash := key.(chainhash.Hash)
-			tx, err := client.GetRawTransaction(&hash)
-			if err != nil {
-				if jerr, ok := err.(*btcjson.RPCError); ok {
-					switch jerr.Code {
-					case btcjson.ErrRPCClientInInitialDownload:
-					case btcjson.ErrRPCClientNotConnected:
-						time.Sleep(rpcRetryPeriod*time.Millisecond)
-						retryCount++
-						break RETRY
-					default:
-						return nil, false
-					}
-				}		
-			}
-
-			// Return decoded transaction record
-			return NewTxRecord(tx.MsgTx()), true
-		}	
-		return nil, false
-	}
-
-	return fetchFunc
-}
 
 // NewTxOutCache allocates a new empty cache
 func NewTxOutCache(client *btcrpcclient.Client) (*TxOutCache) {
 	
-
-	fetchFunc      := newRPCTxFetchFunc(client)
-	fetchWorkers   := uint32(1)
-	fetchQueueSize := fetchWorkers*2+1
-
-	cache := simplelru.NewFetchingLRUCache(
-		defaultCacheSize, defaultCachePruneSize,
-		fetchFunc, fetchWorkers, fetchQueueSize)
-
 	return &TxOutCache{
-		cache: cache,
+		cache: make(map[chainhash.Hash]TxRecord),
 		rpc:  client,
 	}
 }
 
-// Resize cache and set new prune size
-func (t *TxOutCache) Resize(size int, prune int) {
-	t.cache.Resize(size, prune)
-}
 
-func (t *TxOutCache) getTxOut(txHash *chainhash.Hash, nOut uint32, peek bool) (*primitives.TxOut, error) {
-	txRecordInterface, ok := t.cache.Get(*txHash)
+func (t *TxOutCache) getTxOut(txHash *chainhash.Hash, nOut uint32, peek bool) *primitives.TxOut {
+	record, ok := t.cache[*txHash]
 	if !ok {
-		errMsg := fmt.Sprintf("Unable to retrieve Tx(%v)", txHash)
-		return nil, NewErrRPCFail(errMsg)
+		return nil
 	}
 
-	record := txRecordInterface.(*TxRecord)
 	if nOut+1 > uint32(len(record.Outputs)) {
-		errMsg := fmt.Sprintf("Tx() doesn't containts %v", txHash, nOut)
-		return nil, NewErrMissingTxOut(errMsg)
+		log.Panicf("Transaction %v doesn't have output %v", *txHash, nOut)
 	}
 
 	out := record.Outputs[nOut]
 	if out == nil {
-		// Each TxOut is only retrieved once and then deleted, so this shouldn't
-		// happen, but just in case discard the record and retrieve the full 
-		// transaction again.
-		t.cache.Remove(*txHash)
-		return t.getTxOut(txHash, nOut, peek)
+		// The output was already used, or didn't contain relevant information
+		return nil
 	}
 
 	// If it isn't a peek delete the txout and also the transaction it's empty
@@ -167,45 +114,48 @@ func (t *TxOutCache) getTxOut(txHash *chainhash.Hash, nOut uint32, peek bool) (*
 		record.Outputs[nOut] = nil
 		record.unspent--
 		if record.unspent == 0 {
-			t.cache.Remove(*txHash)
+			delete(t.cache, *txHash)
 		}
 	}
 
-	return primitives.NewTxOut(txHash, nOut, out.Addr, out.Value), nil
+	return primitives.NewTxOut(txHash, nOut, out.Addr, out.Value)
 }
 
 // Get value for unspent Tx Output
-func (t *TxOutCache) GetTxOut(txHash *chainhash.Hash, nOut uint32) (*primitives.TxOut, error) {
+func (t *TxOutCache) GetTxOut(txHash *chainhash.Hash, nOut uint32) *primitives.TxOut {
 	return t.getTxOut(txHash, nOut, false)
 }
 
 // PeekTxOut returns cached txout but without deleting the used TxOut from cache
-func (t *TxOutCache) PeekTxOut(txHash *chainhash.Hash, nOut uint32) (*primitives.TxOut, error) {
+func (t *TxOutCache) PeekTxOut(txHash *chainhash.Hash, nOut uint32) *primitives.TxOut {
 	return t.getTxOut(txHash, nOut, true)
 }
 
 // Add transaction outputs and remove transactions inputs to and from the pool
-func (t *TxOutCache) SetTx(txHash *chainhash.Hash, tx *wire.MsgTx) error {
-	t.cache.Set(*txHash, NewTxRecord(tx))
-	return nil
+func (t *TxOutCache) SetTx(txHash *chainhash.Hash, tx *wire.MsgTx) {
+	record := NewTxRecord(tx)
+
+	// Eliminate outputs without an address ot with 0 value because they will not
+	// affect balance calculations
+	for n, txOut := range record.Outputs {
+		if txOut.Value == 0 || txOut.Addr == "" {
+			record.Outputs[n] = nil
+			record.unspent--
+		}
+	}
+
+	// It it has unspent outputs add transaction to cache
+	if record.unspent > 0 {
+		t.cache[*txHash] = *record
+	}
 }
 
 // Remove transaction record from cache if it's still cached
 func (t *TxOutCache) DelTx(txHash *chainhash.Hash) {
-	t.cache.Remove(*txHash)
+	delete(t.cache, *txHash)
 }
 
 
-// Update pool with block transactions
-func (t *TxOutCache) AddBlock(block *wire.MsgBlock) error {
-	for _, tx := range block.Transactions {
-		hash := tx.TxHash()
-		err := t.SetTx(&hash, tx)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+func (t *TxOutCache) Len() int {
+	return len(t.cache)
 }
-
-
