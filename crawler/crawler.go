@@ -206,10 +206,7 @@ func (c *Crawler) processTx(wireTx *wire.MsgTx) (*primitives.Tx, error){
 	
 	// Outputs
 	for n, _ := range wireTx.TxOut {
-		txout, err := c.cache.PeekTxOut(&hash, uint32(n))
-		if err != nil {
-			return nil, err
-		}
+		txout := c.cache.PeekTxOut(&hash, uint32(n))
 		tx.AddOut(txout)	
 	}
 
@@ -221,12 +218,10 @@ func (c *Crawler) processTx(wireTx *wire.MsgTx) (*primitives.Tx, error){
 	// Inputs
 	for _, txin := range wireTx.TxIn {
 		// If the  txin is 
-		txout, err := c.cache.GetTxOut(&txin.PreviousOutPoint.Hash, txin.PreviousOutPoint.Index)
-		if err != nil {
-			return nil, err
+		txout := c.cache.GetTxOut(&txin.PreviousOutPoint.Hash, txin.PreviousOutPoint.Index)
+		if txout != nil {
+			tx.AddIn(txout)
 		}
-	
-		tx.AddIn(txout)
 	}
 
 	return tx, nil
@@ -246,10 +241,16 @@ func (c *Crawler) processBlock(block *wire.MsgBlock, height uint64) (*primitives
 		}
 		transactions[n] = tx
 	}
-
+	log.Print(TxOutCount, TxCount, TxOutCount/TxCount)
 	pBlock := primitives.NewBlock(hash, prevHash, height)
 	pBlock.Transactions = transactions
 
+	if pBlock.Height %100 == 0 {
+		log.Print(c.cache.Len())
+	}
+	if pBlock.Height == 200000 {
+		time.Sleep(100000*time.Millisecond)
+	}
 	return pBlock, nil
 }
 

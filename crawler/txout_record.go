@@ -20,23 +20,24 @@ type TxRecordOut struct {
 	Value int64
 }
 
+
+var TxCount int64
+var TxOutCount int64
+
+
 // NewTxRecord constructs  a TxRecord from raw wire transaction
 func NewTxRecord(tx *wire.MsgTx) *TxRecord {
 	
-	outputs := make([]*TxRecordOut, 0, len(tx.TxOut))
-	unspent := uint32(0)
-	for _, txout := range tx.TxOut {
-		outputs = append(outputs, NewTxRecordOut(txout))
-		
-		// Only consider spendable outputs
-		if txout.Value != 0 {
-			unspent++
-		}
+	outputs := make([]*TxRecordOut, len(tx.TxOut))
+	for n, txout := range tx.TxOut {
+		outputs[n] = NewTxRecordOut(txout)
+		TxOutCount++
 	}
 
+	TxCount++
 	return &TxRecord{
 		Outputs: outputs,
-		unspent: unspent,
+		unspent: uint32(len(tx.TxOut)),
 	}
 }
 
