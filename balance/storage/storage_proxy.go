@@ -65,9 +65,9 @@ func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache
 }
 
 // GetHeight
-func (s *StorageProxyCache) GetHeight() (height int64, err error) {
+func (s *StorageProxyCache) Height() (height int64) {
 	s.RLock()
-	height, err = s.height, nil
+	height = s.height
 	s.RUnlock()
 	return
 }
@@ -120,8 +120,8 @@ func (s *StorageProxyCache) Commit() (err error){
 	s.Lock()
 
 
-	// Find all pending updates whose balance is not cached
-	var missing []string
+	// Find all not cached pending updates
+	var missing = make([]string, 0, len(s.pending))
 	for address, _ := range s.pending {
 		if !s.cache.Contains(address) {
 			missing = append(missing, address)
@@ -141,9 +141,9 @@ func (s *StorageProxyCache) Commit() (err error){
 	}
 
 	// Split pending into updates/inserts/deletions
-	var update []AddressBalancePair
-	var insert []AddressBalancePair
-	var remove []string
+	var insert = make([]AddressBalancePair, 0, len(s.pending))
+	var update = make([]AddressBalancePair, 0, len(s.pending))
+	var remove = make([]string, 0, len(s.pending))
 	for address, amount := range s.pending {
 		ibalance, _ := s.cache.Peek(address) // All should be cached
 		balance := ibalance.(int64)
@@ -166,7 +166,7 @@ func (s *StorageProxyCache) Commit() (err error){
 		}
 	}
 
-	// Remove missing addressed added to cache and return cache to original size
+	// Remove missing addresses added to cache and return cache to its original size
 	for _, _ = range missing {
 		s.cache.RemoveNewest()
 	}

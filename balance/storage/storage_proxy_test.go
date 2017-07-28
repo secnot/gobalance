@@ -70,11 +70,8 @@ func cacheHasUncommittedLen(t *testing.T, cache *StorageProxyCache, length int) 
 }
 
 func cacheHasHeight(t *testing.T, cache *StorageProxyCache, height int64) {	
-	if h, err := cache.GetHeight(); err != nil {
-		errMsg := fmt.Sprintf("GetHeight(): %v", err)
-		t.Error(errMsg)
-	} else if h != height {
-		errMsg := fmt.Sprintf("GetHeight() returned %v expecting %v", 
+	if h := cache.Height(); h != height {
+		errMsg := fmt.Sprintf("Height() returned %v expecting %v", 
 							h, height)
 		t.Error(errMsg)
 	}

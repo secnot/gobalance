@@ -12,7 +12,7 @@ import (
 
 	"github.com/secnot/gobalance/crawler"
 	_ "github.com/secnot/gobalance/balance"
-	_  "github.com/secnot/gobalance/balance/storage"
+	_ "github.com/secnot/gobalance/balance/storage"
 	"github.com/secnot/gobalance/primitives"
 )
 

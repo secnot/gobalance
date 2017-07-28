@@ -96,7 +96,7 @@ func NewTxOutCache(client *btcrpcclient.Client) (*TxOutCache) {
 func (t *TxOutCache) getTxOut(txHash *chainhash.Hash, nOut uint32, peek bool) *primitives.TxOut {
 	record, ok := t.cache[*txHash]
 	if !ok {
-		return nil
+		return primitives.NewTxOut(txHash, nOut, "", 0)
 	}
 
 	if nOut+1 > uint32(len(record.Outputs)) {
@@ -106,7 +106,7 @@ func (t *TxOutCache) getTxOut(txHash *chainhash.Hash, nOut uint32, peek bool) *p
 	out := record.Outputs[nOut]
 	if out == nil {
 		// The output was already used, or didn't contain relevant information
-		return nil
+		return primitives.NewTxOut(txHash, nOut, "", 0)
 	}
 
 	// If it isn't a peek delete the txout and also the transaction it's empty

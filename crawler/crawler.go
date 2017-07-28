@@ -241,13 +241,9 @@ func (c *Crawler) processBlock(block *wire.MsgBlock, height uint64) (*primitives
 		}
 		transactions[n] = tx
 	}
-	log.Print(TxOutCount, TxCount, TxOutCount/TxCount)
 	pBlock := primitives.NewBlock(hash, prevHash, height)
 	pBlock.Transactions = transactions
 
-	if pBlock.Height %100 == 0 {
-		log.Print(c.cache.Len())
-	}
 	if pBlock.Height == 200000 {
 		time.Sleep(100000*time.Millisecond)
 	}
