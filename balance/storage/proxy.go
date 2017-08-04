@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"log"
 	"sync"
 	"fmt"
 	"github.com/secnot/simplelru"
@@ -130,6 +131,7 @@ func (s *StorageProxyCache) Commit() (err error){
 	
 	missingBalance, err := s.storage.BulkGet(missing)
 	if err != nil {
+		log.Printf("Commit(): storage failed \"%v\"", err)
 		s.Unlock()
 		return err
 	}
@@ -190,7 +192,6 @@ func (s *StorageProxyCache) Commit() (err error){
 		// Clear pending updates
 		s.pending = make(map[string]int64)
 	}
-
 	s.Unlock()
 	return err
 }

@@ -101,7 +101,9 @@ func cacheHasSize(t *testing.T, cache *StorageProxyCache, cacheSize int) {
 		address := fmt.Sprintf("test_size_address_%v", i)
 		cache.Update(address, i+1000)
 	}
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 
 	// Fill cache until there's a prune
 	cache.CacheClear()
@@ -194,7 +196,10 @@ func TestStorageProxyNegativeBalanceDetection(t *testing.T) {
 	// Check NegativeBalanceError is returned when required
 	cache.SetHeight(10)
 	cache.Update("address", 10)
-	cache.Commit()
+
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 
 	storageHasBalance(t, storage, "address", 10)
 	cacheHasBalance(t, cache, "address", 10)
@@ -219,7 +224,9 @@ func TestStorageProxyNegativeBalanceDetection(t *testing.T) {
 	}
 
 	// Committing should also generate a NegativeBalanceError
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 
 	if err = cache.Commit(); err == nil {
 		t.Error("Committing a negative balance should have returned and error")
@@ -241,7 +248,9 @@ func TestStorageProxyNegativeBalanceDetection2(t *testing.T) {
 	cache, _ := NewStorageProxyCache(storage, 100)
 
 	cache.Update("new_address", 34)
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 
 	cache.Update("new_address", -44)
 	if err := cache.Commit(); err == nil {
@@ -273,7 +282,9 @@ func TestStorageProxyUpdate(t *testing.T) {
 	cacheHasUncommittedLen(t, cache, 1)
 	storageHasBalance(t, storage, "secret", 0)
 	
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 	cacheHasUncommittedLen(t, cache, 0)
 	cacheHasBalance(t, cache, "secret", 999)
 	storageHasBalance(t, storage, "secret", 999)
@@ -299,12 +310,16 @@ func TestStorageProxyUpdate(t *testing.T) {
 
 	cache.SetHeight(33)
 	cache.Update("an_address", 66)
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 	storageHasLen(t, storage, 1)
 	storageHasBalance(t, storage, "an_address", 66)
 
 	cache.Update("an_address", -66)
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 	cacheHasBalance(t, cache, "an_address", 0)
 	storageHasLen(t, storage, 0)
 	storageHasBalance(t, storage, "and_address", 0)
@@ -324,7 +339,9 @@ func TestStorageProxyUpdate(t *testing.T) {
 	cache.Update("address", -1)
 	cacheHasUncommittedLen(t, cache, 0)
 
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 
 	// Check nothing was added to storage
 	storageHasLen(t, storage, 0)
@@ -351,7 +368,9 @@ func TestStorageProxyCacheSize(t *testing.T) {
 	cache.Update("address_1", 5)
 	cache.Update("address_2", 5)
 	cache.Update("address_5000", 40)
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 	
 	cacheHasSize(t, cache, cacheSize)
 }
@@ -381,7 +400,9 @@ func TestStorageProxyCommitCache(t *testing.T) {
 	cache.Update("new_address_1", 1)
 	cache.Update("new_address_2", 2)
 	cache.Update("new_address_3", 3)
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 
 	// Check the cache was left unchanged
 	cacheHasStats(t, cache, 500, 500)	
@@ -439,7 +460,9 @@ func TestStorageProxyConcurrentGet(t *testing.T) {
 
 	commitFunc := func (cache *StorageProxyCache, delay int) {
 		time.Sleep(time.Duration(delay)*time.Millisecond)
-		cache.Commit()
+		if err := cache.Commit(); err != nil {
+			t.Error(err)
+		}
 	}
 
 	// 
@@ -456,7 +479,9 @@ func TestStorageProxyConcurrentGet(t *testing.T) {
 
 	// Wait until all updates and commits are finished
 	time.Sleep(300*time.Millisecond)
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+	}
 	storageHasBalance(t, storage, "one_address", 2000)
 	cacheHasBalance(t, cache, "one_address", 2000)
 	storageHasBalance(t, storage, "two_address", 1000)

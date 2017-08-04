@@ -13,7 +13,7 @@ const (
 	BalanceCacheSize = 200000
 
 	// Number of pending updates required to trigger a Commit
-	BalanceCommitSize = 50000
+	BalanceCommitSize = 20000
 )
 
 
@@ -187,7 +187,10 @@ func (b *BalanceProcessor) NewBlock(block *primitives.Block) {
 	// TODO: Don't accumulate updates if more than 5 minutes have passed
 	// since the last (ie .- initial sync has finished)
 	if b.balance.UncommittedLen() > BalanceCommitSize {
-		b.balance.Commit()
+		err := b.balance.Commit() 
+		if err != nil {
+			log.Panic("proxy.Commit(): ", err)
+		}
 	}
 	return
 }
