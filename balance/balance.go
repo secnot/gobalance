@@ -5,156 +5,16 @@ import (
 	"sync"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/secnot/gobalance/balance/storage"
-	"github.com/secnot/simplelru"
+	"github.com/secnot/gobalance/crawler"
 	"github.com/phf/go-queue/queue"
 )
 
 const (
-	BalanceCacheSize = 200000
-	BalanceConcurrentQueryWorkers = 10
+	BalanceCacheSize = 100000
+
+	// Number of pending updates required to trigger a Commit
+	BalanceCommitSize = 400000
 )
-
-type Balance struct {
-
-	// 
-	sync.RWMutex
-	
-	// Balance cache, this are cached from storage
-	cache *simplelru.LRUCache
-
-	// Persistent storage
-	store storage.Storage
-
-	// Current height
-	height int64
-
-	// Updates
-	updates map[string]int64
-}
-
-func NewBalance(store storage.Storage) (*Balance, error) {
-	
-	height, err := store.GetHeight()
-	if err != nil {
-		return nil, err
-	}
-
-	fetchBalance := func (address interface{}) (value interface{}, ok bool) {
-	
-		balance, err := store.Get(address.(string))
-		if err != nil {
-			return nil, false
-		}
-
-		return balance, true
-	}
-
-	cache := simplelru.NewFetchingLRUCache(
-		BalanceCacheSize,
-		BalanceCacheSize/100+1,
-		fetchBalance,
-		BalanceConcurrentQueryWorkers,
-		BalanceConcurrentQueryWorkers*3)
-	
-	return &Balance{
-		cache:   cache,
-		store:   store,
-		height:  height,
-		updates: make(map[string]int64),
-	}, nil
-}
-
-func (b *Balance) GetBalance(address string) (int64, error) {
-	b.RLock()
-	defer b.RUnlock()
-	balance, ok := b.cache.Get(address)
-	if !ok {
-		// Storage failed if the address didn't existe it should have
-		// returned 0, true
-		log.Panicf("Storage failure: %v", b.store)
-	}
-
-	return balance.(int64)+b.updates[address], nil
-}
-
-func (b *Balance) UpdateBalance(address string, value int64) {
-	b.Lock()
-	current := b.updates[address]
-	if current+value == 0{	
-		delete(b.updates, address)
-	} else {
-		b.updates[address] = current+value
-	}
-	b.Unlock()
-}
-
-// Len returns the number of pending updates
-func (b *Balance) Len() int {
-	return len(b.updates)
-}
-
-// Commit updates to storage
-// TODO: Reuse missing/insert/update/remove arrays between calls
-func (b *Balance) Commit(height int64) error {
-	b.Lock()
-	defer b.Unlock()
-	
-	// Load into cache the balance for all pending updates.
-	var updatedAddr = make([]string, len(b.updates))
-	
-	i := 0
-	for addr, _ := range b.updates {
-		updatedAddr[i] = addr
-		i++
-	}
-
-	balances, err := b.store.BulkGet(updatedAddr)
-	if err != nil {
-		return err
-	}
-
-	// Split addresses into Insert/Update/Remove slices
-	var insert = make([]storage.AddressBalancePair, len(updatedAddr))
-	var update = make([]storage.AddressBalancePair, len(updatedAddr))
-	var remove = make([]string, len(updatedAddr))
-
-	for n, addr := range updatedAddr {
-		balance := balances[n]
-		upValue := b.updates[addr]
-		if balance == 0 {
-			// Insert
-			insert = append(insert, storage.AddressBalancePair{addr, upValue})
-		} else if balance + upValue == 0 {
-			// Delete
-			remove = append(remove, addr)
-		} else {
-			// Update
-			update = append(update, storage.AddressBalancePair{addr, balance+upValue})
-		}
-
-	}
-
-	err = b.store.BulkUpdate(insert, update, remove, height)
-	if err != nil {
-		return err
-	}
-	b.height = height
-
-	// Update cache and cleanup Stats
-	cachedCount := 0
-	for n, addr := range updatedAddr {
-		balance := balances[n]
-		upValue := b.updates[addr]
-		if b.cache.Contains(addr) {
-			cachedCount++
-		}
-		b.cache.Set(addr, balance+upValue)
-	}
-	log.Print(height, cachedCount, len(updatedAddr))
-	b.updates = make(map[string]int64)
-	return nil
-}
-
 
 
 
@@ -163,62 +23,188 @@ type BalanceProcessor struct {
 	// Concurrency lock
 	sync.RWMutex
 
-	// Updates not yet committed to storage
-	//pending map[string]int64
-
 	// A cache for the storage 
-	//cache *simplelru.LRUCache
-	balance *Balance
+	balance *storage.StorageProxyCache
 
-	// Block queue waitting go be 
+	// Height of the last processed processed
+	height int64
+
+	// Accumulated balance updates for the blocks without enough confirmations 
+	// to be stored (by address)
+	pending map[string]int64
+
+	// Block height queue waitting go be 
 	blockQueue *queue.Queue
 }
 
 
 // NewBalanceProcessor
 func NewBalanceProcessor(store storage.Storage, caseSize int) (balance *BalanceProcessor) {
-	bal, err := NewBalance(store)
+	storageCache, err := storage.NewStorageProxyCache(store, BalanceCacheSize)
 	if err != nil {
+		log.Print(err)
 		return nil
 	}
-	
+
 	return &BalanceProcessor{
-		balance: bal,
+		balance: storageCache,
+		height: storageCache.Height(),
 		blockQueue: queue.New(),
+		pending: make(map[string]int64),
 	}
 }
 
-func (b *BalanceProcessor) GetBalance(address string) {
-	return
+// GetBalance returns the address balance or 0
+func (b *BalanceProcessor) GetBalance(address string) (bal int64, err error){
+	b.RLock()
+	bal, err = b.balance.Get(address)
+	bal += b.pending[address]
+	b.RUnlock()
+	return 
+}
+
+// addToPending adds block inputs and outputs to pending map
+func (b *BalanceProcessor) addToPending(block *primitives.Block) {
+	for _, tx := range block.Transactions {
+		// Add Outpus
+		for _, out := range tx.Out {
+			if out.Addr != "" && out.Value != 0 {
+				b.pending[out.Addr] += out.Value
+				
+				if b.pending[out.Addr] == 0 {
+					delete(b.pending, out.Addr)
+				}
+			}
+		}
+
+		// Substract inputs
+		for _, in := range tx.In {
+			if in.Addr != "" && in.Value != 0 {
+				b.pending[in.Addr] -= in.Value
+				
+				if b.pending[in.Addr] == 0 {
+					delete(b.pending, in.Addr)
+				}
+			}
+		}
+	}
+}
+
+// delFromPending deletes block input and outputs from pending map
+func (b *BalanceProcessor) delFromPending(block *primitives.Block) {
+	for _, tx := range block.Transactions {
+		// Add Outpus
+		for _, out := range tx.Out {
+			if out.Addr != "" && out.Value != 0 {
+				b.pending[out.Addr] -= out.Value
+				
+				if b.pending[out.Addr] == 0 {
+					delete(b.pending, out.Addr)
+				}
+			}
+		}
+
+		// Substract inputs
+		for _, in := range tx.In {
+			if in.Addr != "" && in.Value != 0 {
+				b.pending[in.Addr] += in.Value
+				
+				if b.pending[in.Addr] == 0 {
+					delete(b.pending, in.Addr)
+				}
+			}
+		}
+	}
+}
+
+// addBlock enques a new block
+func (b *BalanceProcessor) addBlock(block *primitives.Block) {
+
+	 b.Lock()
+	 b.addToPending(block)
+	 b.blockQueue.PushBack(block)
+	 b.height = int64(block.Height)
+	 b.Unlock()
+}
+
+// storeOldestBlock dequeues and stores the oldest block
+func (b *BalanceProcessor) storeOldestBlock() {
+
+	b.Lock()
+	iblock := b.blockQueue.PopFront()
+	if iblock == nil {
+		b.Unlock()
+		return
+	}
+	block := iblock.(*primitives.Block)
+	b.delFromPending(block)
+
+	// Commit to storage
+	for _, tx := range block.Transactions {		
+		
+		// Add Outpus
+		for _, out := range tx.Out {
+			if out.Addr != "" {
+				b.balance.Update(out.Addr, out.Value)
+			}
+		}
+
+		// Substract inputs
+		for _, in := range tx.In {
+			if in.Addr != "" {
+				b.balance.Update(in.Addr, -in.Value)
+			}
+		}
+	}
+	b.balance.SetHeight(int64(block.Height))
+	b.Unlock()
 }
 
 // NewBlock is called by the crawler to send the latest block 
 func (b *BalanceProcessor) NewBlock(block *primitives.Block) {
-	for _, tx := range block.Transactions {
-		
-		// Add Outpus to address balance
-		for _, out := range tx.Out {
-			if out.Addr != "" {
-				b.balance.UpdateBalance(out.Addr, out.Value)
-			}
-		}
-
-		// Substract inputs from address balance
-		for _, in := range tx.In {
-			if in.Addr != "" {
-				b.balance.UpdateBalance(in.Addr, -in.Value)
-			}
-		}
+	
+	// Ignore blocks older than the current height, the crawler is catching up
+	if int64(block.Height) <= b.height {
+		return 
 	}
 
-	if block.Height%5 == 0 {
-		b.balance.Commit(int64(block.Height))
+	// Check no blocks were skiped
+	if int64(block.Height) != b.height+1 {
+		log.Panicf("BalanceProcessor: Height is %v but the new block height is %v",
+			b.height, block.Height)
+	}
+
+	// Store new block and update pending
+	b.addBlock(block)
+
+	// Pop oldest block to send to storage, if it has enough confirmations
+	if b.blockQueue.Len() < crawler.BacktrackLogSize {
+		return
+	}
+	b.storeOldestBlock()
+
+	// Commit only if there are enough pending updates in storage
+	// TODO: Don't accumulate updates if more than 5 minutes have passed
+	// since the last (ie .- initial sync has finished)
+	if b.balance.UncommittedLen() > BalanceCommitSize {
+		err := b.balance.Commit() 
+		if err != nil {
+			log.Panic("proxy.Commit(): ", err)
+		}
 	}
 	return
 }
 
 // BacktrackBlock is called by the crawler to invalidate the last block
 func (b *BalanceProcessor) BacktrackBlock(block *primitives.Block) {
-	// TODO:
-	return
+	bblock := b.blockQueue.PopBack()
+	if bblock == nil {
+		log.Panic("BalanceProcessor: Reached backtrack limit.")
+	}
+
+	if bblock.(*primitives.Block).Height != block.Height {
+		log.Panic("BalanceProcessor: Backtrack block height missmatch")
+	}
+
+	b.delFromPending(bblock.(*primitives.Block))	
 }

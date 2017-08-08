@@ -11,8 +11,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 
 	"github.com/secnot/gobalance/crawler"
-	_ "github.com/secnot/gobalance/balance"
-	_  "github.com/secnot/gobalance/balance/storage"
+	"github.com/secnot/gobalance/balance"
+	"github.com/secnot/gobalance/balance/storage"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -42,9 +42,12 @@ func main() {
 	blockCrawler := crawler.NewCrawler(client, 0)
 
 	// Balance
-	//memStorage := storage.NewMemoryStorage()
-	//balanceProc := balance.NewBalanceProcessor(memStorage, 200000) // cachesize
-	//blockCrawler.Subscribe(balanceProc)
+	sqlStorage, err := storage.NewSQLiteStorage("./DB_balance.db")
+	if err != nil {
+		log.Panic(err)
+	}
+	balanceProc := balance.NewBalanceProcessor(sqlStorage, 200000)
+	blockCrawler.Subscribe(balanceProc)
 
 	// Logging
 	blockCrawler.Subscribe(crawler.NewLogger())

@@ -1,23 +1,32 @@
 package storage
 
 
+type AddressBalancePair struct {
+	Address string
+	Balance int64
+}
+
 // Memory and SQL storage interface:
 type Storage interface {
 
 	// Number of stored addresses
 	Len() (length int, err error)
 	
-	// Get current height, return error if none set
+	// Get current height, return -1 if none stored
 	GetHeight() (height int64, err error)
 
 	// Set New height
 	SetHeight(height int64) (err error)
 
-	// Get address balance
+	// Get address balance or 0 if it isn't stored
 	Get(address string) (value int64, err error)
 
-	// Set address balance
+	// Set address balance overwritting current balance if it exists.
 	Set(address string, value int64) (err error)
+
+	// Update or create an address balance by adding or substracting a 
+	// value. If the resulting balance is 0 the record is deleted.
+	Update(address string, value int64) (err error)
 
 	// Delete address balance from storage, if the address
 	// doesn't exist not error is returned.
@@ -26,19 +35,13 @@ type Storage interface {
 	// Returns true if Storage contains address
 	Contains(address string) (bool, error)
 
-	// Atomic bulk balance get
-	BulkGet(addresses []string) (balance []int64, err error)
+	// Atomic bulk balance query
+	BulkGet(address []string) (balance []int64, err error)
 
-	// Atomic bulk storage update
-	BulkUpdate(insert []AddressBalancePair, 
-			   update []AddressBalancePair, 
-			   remove []string, height int64) (err error)
+	// Atomic bulk balance update
+	BulkUpdate(update []AddressBalancePair, height int64) (err error)
 }
 
 
-type AddressBalancePair struct {
-	Address string
-	Balance int64
-}
 
 

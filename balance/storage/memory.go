@@ -1,6 +1,9 @@
 package storage
 
-import "sync"
+import (
+	"sync"
+	"fmt"
+)
 
 // In Memory Balance Storage
 type MemoryStorage struct {
@@ -59,24 +62,44 @@ func (s *MemoryStorage) Get(address string) (value int64, err error) {
 // Set address balance, if 0 the value is deleted
 func (s *MemoryStorage) Set(address string, balance int64) (err error){
 	s.Lock()
-	if balance == 0 {
+	if balance > 0 {
+		s.store[address] = balance
+	} else if balance == 0  {
 		delete(s.store, address)
 	} else {
-		s.store[address] = balance
+		errMsg := fmt.Sprintf("%v: %v", address, balance)
+		err = NewNegativeBalanceError(errMsg)
 	}
 	s.Unlock()
-	return nil
+	return err
+}
+
+// Update or create an address balance by adding or substracting a 
+// value. If the resulting balance is 0 the record is deleted.
+func (s *MemoryStorage) Update(address string, update int64) (err error) {
+	s.Lock()
+	balance := s.store[address]
+	if balance + update > 0 {
+		s.store[address] = balance + update
+	} else if balance + update == 0 {
+		delete(s.store, address)
+	} else {
+		errMsg := fmt.Sprintf("%v: %v", address, balance + update)
+		err = NewNegativeBalanceError(errMsg)
+	}
+	s.Unlock()
+	return err
 }
 
 // Contains returns true if the address is stored false otherwise 
 func (s *MemoryStorage) Contains(address string) (cont bool, err error) {
-	if _, ok := s.store[address]; !ok {
-		return false, nil
-	}
-	return true, nil
+	s.RLock()
+	_, cont = s.store[address]
+	s.RUnlock()
+	return
 }
 
-// Remove address from balance
+// Delete removes an address from balance if it doen't exist nothing happens
 func (s *MemoryStorage) Delete(address string) (err error){
 	s.Lock()
 	delete(s.store, address)
@@ -84,52 +107,43 @@ func (s *MemoryStorage) Delete(address string) (err error){
 	return nil
 }
 
-// Return values for a list of addresses
+// BulkGet returns the balance for the address in the slice
 func (s *MemoryStorage) BulkGet(addresses []string) (balance []int64, err error){
 
-	values := make([]int64, len(addresses))
+	balance = make([]int64, len(addresses))
 	s.RLock()
 	for n, addr := range addresses {
-		if value, ok := s.store[addr]; ok {
-			values[n] = value
+		if bal, ok := s.store[addr]; ok {
+			balance[n] = bal
 		}
 	}
 	s.RUnlock()
-
-	return values, nil
+	return
 }
 
-// Mass update storage in an atomic operation 
-// (safely update SQL DB within a single transaction)
-func (s *MemoryStorage) BulkUpdate(insert []AddressBalancePair, 
-							 update []AddressBalancePair, 
-							 remove []string, height int64) (err error){
+// BulkUpdate mass updates storage balance and height in an atomic operation
+func (s *MemoryStorage) BulkUpdate(update []AddressBalancePair, 
+				height int64) (err error){
 	s.Lock()
-
-	// Insert new pairs
-	for _, pair := range insert {	
-		if pair.Balance != 0 {
-			s.store[pair.Address] = pair.Balance
-		}
-	}
-
+	// TODO: Check none of the updates result in a negative balance before 
+	// updating storage so there's no need to backtrack.
 	// Update existing balance
-	for _, pair := range update {
-		if pair.Balance != 0 {
-			s.store[pair.Address] = pair.Balance
+	for _, up := range update {
+		currentBalance := s.store[up.Address]
+		if currentBalance + up.Balance > 0 {
+			s.store[up.Address] = currentBalance + up.Balance
+		} else if currentBalance + up.Balance == 0 {
+			delete(s.store, up.Address)
 		} else {
-			delete(s.store, pair.Address)
+			errMsg := fmt.Sprintf("%v: %v", up.Address, currentBalance + up.Balance)
+			err = NewNegativeBalanceError(errMsg)
+			break
 		}
-	}
-
-	// Delete balance
-	for _, address := range remove {
-		delete(s.store, address)
 	}
 
 	// 
 	s.height = height
 	s.Unlock()
-	return nil
+	return err
 }
 

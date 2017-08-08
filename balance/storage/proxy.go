@@ -65,9 +65,9 @@ func NewStorageProxyCache(storage Storage, cache_size int) (s *StorageProxyCache
 }
 
 // GetHeight
-func (s *StorageProxyCache) GetHeight() (height int64, err error) {
+func (s *StorageProxyCache) Height() (height int64) {
 	s.RLock()
-	height, err = s.height, nil
+	height = s.height
 	s.RUnlock()
 	return
 }
@@ -90,7 +90,7 @@ func (s *StorageProxyCache) Get(address string) (balance int64, err error) {
 		//There was an error while fetching the balance from storage
 		return 0, NewStorageError("Unable to access storage")
 	}
-		
+
 	// Add pending updates and return...
 	balance = storedBalance.(int64) + s.pending[address]
 	if balance < 0 {
@@ -116,77 +116,26 @@ func (s *StorageProxyCache) Update(address string, amount int64) {
 
 // Commit pending updates to storage
 func (s *StorageProxyCache) Commit() (err error){
-
 	s.Lock()
 
-
-	// Find all pending updates whose balance is not cached
-	var missing []string
-	for address, _ := range s.pending {
-		if !s.cache.Contains(address) {
-			missing = append(missing, address)
-		}
-	}
-	
-	missingBalance, err := s.storage.BulkGet(missing)
-	if err != nil {
-		s.Unlock()
-		return err
-	}
-
-	// Resize cache to fit all the missing balances without pruning
-	s.cache.Resize(s.cache_size+len(missing)+1, s.cache_size/100+1)
-	for n, address := range missing {
-		s.cache.Set(address, missingBalance[n])
-	}
-
-	// Split pending into updates/inserts/deletions
-	var update []AddressBalancePair
-	var insert []AddressBalancePair
-	var remove []string
+	// Find all not cached pending updates
+	updates := make([]AddressBalancePair, len(s.pending))
+	i := 0
 	for address, amount := range s.pending {
-		ibalance, _ := s.cache.Peek(address) // All should be cached
-		balance := ibalance.(int64)
-		if balance + amount < 0 {
-			errMsg := fmt.Sprintf("Commit(): \"%v\" balance is negative (%v)", 
-				address, balance+amount)
-			err = NewNegativeBalanceError(errMsg)
-			break
-		}
-		
-		if balance == 0 {
-			// INSERT
-			insert = append(insert, AddressBalancePair{address, amount})
-		} else if balance + amount == 0 {
-			// DELETE
-			remove = append(remove, address)
-		} else {
-			// UPDATE
-			update = append(update, AddressBalancePair{address, balance+amount})
-		}
-	}
-
-	// Remove missing addressed added to cache and return cache to original size
-	for _, _ = range missing {
-		s.cache.RemoveNewest()
-	}
-	s.cache.Resize(s.cache_size, s.cache_size/100+1)
-	
-	if err != nil { // Negative balance error
-		s.Unlock()
-		return err
+		updates[i] = AddressBalancePair{address, amount}
+		i++
 	}
 	
 	// Update storage
-	err = s.storage.BulkUpdate(insert, update, remove, s.height)
+	err = s.storage.BulkUpdate(updates, s.height)
 	if err == nil {
-		// Update cached balances
+		// Update balance cache
 		for address, update := range s.pending {
 			if balance, ok := s.cache.Peek(address); ok {
 				s.cache.Set(address, balance.(int64) + update)
 			}
 		}
-
+		
 		// Clear pending updates
 		s.pending = make(map[string]int64)
 	}
