@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	BalanceCacheSize = 200000
+	BalanceCacheSize = 100000
 
 	// Number of pending updates required to trigger a Commit
-	BalanceCommitSize = 20000
+	BalanceCommitSize = 400000
 )
 
 

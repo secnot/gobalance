@@ -16,8 +16,6 @@ func (e StorageError) Error() string {
 	return e.Message
 }
 
-
-
 // Operations resulting in a negative balance
 type NegativeBalanceError struct {
 	Message string

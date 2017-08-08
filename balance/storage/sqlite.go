@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"log"
+	"fmt"
 	"database/sql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -33,23 +33,16 @@ type SQLiteStorage struct {
 	//
 	db *sqlx.DB
 
-	// Simple stored statements
+	// Stored statements initialized when the db is openned
 	lenStmt *sqlx.Stmt
 	getStmt *sqlx.Stmt
 	setStmt *sqlx.Stmt
+	updateStmt *sqlx.Stmt
 	containsStmt *sqlx.Stmt
 	deleteStmt *sqlx.Stmt
 
 	setHeightStmt *sqlx.Stmt
 	getHeightStmt *sqlx.Stmt
-	
-	// Bulk stored statements
-	bulkGetStmt *sqlx.Stmt
-	bulkInsertStmt *sqlx.Stmt
-	bulkUpdateStmt *sqlx.Stmt
-	bulkDeleteStmt *sqlx.Stmt
-
-	//
 }
 
 
@@ -77,7 +70,28 @@ func initDB(driverName string, dataSource string) (db *sqlx.DB, err error){
 			return nil, err
 		}
 	}
-	
+
+	// Add trigger to delete empty balances
+	_, err = db.Exec(`CREATE TRIGGER IF NOT EXISTS Delete_Zero_Trigger 
+			 AFTER INSERT ON balance
+			 for each row when new.balance = 0 begin
+			     delete from balance where address = new.address;
+			 end`)
+	if err != nil {
+		return nil, err
+	}
+
+	// Raise error when balance goes below zero
+    _, err = db.Exec(`CREATE TRIGGER IF NOT EXISTS Error_Negative_Balance
+            BEFORE INSERT ON balance
+            for each row when new.balance < 0
+            BEGIN
+                SELECT RAISE(ABORT, 'Negative balance');
+            END`)
+    if err != nil {
+        return nil, err
+    }
+
 	return db, nil
 }
 
@@ -97,14 +111,13 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 	db.Exec("PRAGMA cache_size=10000")
 	db.Exec("PRAGMA temp_store=MEMORY")
 	db.Exec("PRAGMA journal_mode=MEMORY") // TODO: NOT SAFE
-	//db.Exec("PRAGMA SQLITE_STATIC")
 
 
 	store := &SQLiteStorage {
 		db: db,
 	}
 	
-	// Add prepared statements
+	// Create prepared statements
 	store.lenStmt, err = db.Preparex("SELECT count(*) FROM balance;")
 	if err != nil {
 		return nil, err
@@ -124,6 +137,13 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 	if err != nil {
 		return nil, err
 	}
+	
+	store.updateStmt, err = db.Preparex(`INSERT OR REPLACE INTO balance (address, balance) 
+		VALUES ($1,
+				COALESCE( (SELECT balance FROM balance WHERE address=$1), 0) + $2)`)
+	if err != nil {
+		return nil, err
+	}
 
 	store.deleteStmt, err = db.Preparex("DELETE FROM balance WHERE address=?;")
 	if err != nil {
@@ -140,25 +160,6 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 		return nil, err
 	}
 
-	store.bulkGetStmt, err = db.Preparex("SELECT coalesce(balance, 0) FROM balance WHERE address=?;")
-	if err != nil {
-		return nil, err
-	}
-	
-	store.bulkInsertStmt, err = db.Preparex("INSERT OR REPLACE INTO balance(address, balance) VALUES (?, ?);")
-	if err != nil {
-		return nil, err
-	}
-	
-	store.bulkUpdateStmt, err = db.Preparex("INSERT OR REPLACE INTO balance(address, balance) VALUES (?, ?);")
-	if err != nil {
-		return nil, err
-	}
-
-	store.bulkDeleteStmt, err = db.Preparex("DELETE FROM balance WHERE address=?;")
-	if err != nil {
-		return nil, err
-	}
 	return store, nil
 }
 
@@ -171,10 +172,20 @@ func (s *SQLiteStorage) Len() (length int, err error) {
 
 // Set address balance
 func (s *SQLiteStorage) Set(address string, balance int64) (err error) {
-	if balance != 0 {
-		_, err = s.setStmt.Exec(address, balance)
-	} else {
-		err = s.Delete(address)
+	_, err = s.setStmt.Exec(address, balance) // Trigger will delete if balance = 0
+	if err != nil && err.Error() == "Negative balance" {
+		errMsg := fmt.Sprintf("%v: %v", address, balance)
+		return NewNegativeBalanceError(errMsg)
+	}
+	return
+}
+
+// Update address balance by adding or substracting a balue
+func (s *SQLiteStorage) Update(address string, update int64) (err error) {
+	_, err = s.updateStmt.Exec(address, update) // Trigger will delete if update+balance = 0
+	if err != nil && err.Error() == "Negative balance" {
+		errMsg := fmt.Sprintf("%v: %v", address, update)
+		return NewNegativeBalanceError(errMsg)
 	}
 	return
 }
@@ -242,49 +253,28 @@ func (s *SQLiteStorage) Contains(address string) (bool, error) {
 
 }
 
-// BulkGet Atomic bulk balance get
-// https://stackoverflow.com/questions/20271123/how-to-execute-an-in-lookup-in-sql-using-golang
-// https://stackoverflow.com/questions/20271123/how-to-execute-an-in-lookup-in-sql-using-golang
-func (s *SQLiteStorage) oldBulkGet(addresses []string) ([]int64, error) {
-	//SQLITE_VARIABLE_LIMIT = 999
 
-	if len(addresses) == 0 {
-		return nil, nil
-	}
 
-	//q, args, err := sqlx.In("SELECT ifnull(balance, 0) FROM balance WHERE address IN(?);", addresses)
-	q, args, err := sqlx.In("SELECT address, ifnull(balance, 0) FROM balance WHERE address IN(?);", addresses)
-	if err != nil {
-		return nil, err
-	}
-	
-	rows, err := s.db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
 
-	// Scan results
-	balance := make(map[string]int64, len(addresses))
-	var addr string
-	var bal int64
-	for rows.Next() {
-		err = rows.Scan(&addr, &bal)
-		if err != nil {
-			return nil, err
-		}
-		balance[addr] = bal
-	}
-	rows.Close()
-
-	// Sort results matching addresses order
-	sorted_balance := make([]int64, len(addresses))
-	for n, addr := range addresses {
-		sorted_balance[n] = balance[addr]
-	}
-	return sorted_balance, nil
+// Transaction wrapper
+func Transact(db *sqlx.DB, txFunc func(*sqlx.Tx) error) (err error) {
+    tx, err := db.Beginx()
+    if err != nil {
+        return
+    }
+    defer func() {
+        if p := recover(); p != nil {
+            tx.Rollback()
+            panic(p) // re-throw panic after Rollback
+        } else if err != nil {
+            tx.Rollback()
+        } else {
+            err = tx.Commit()
+        }
+    }()
+    err = txFunc(tx)
+    return err
 }
-
-
 
 
 // 
@@ -315,12 +305,12 @@ func (s *SQLiteStorage) batchBulkGet(address[]string, balance map[string]int64) 
 	return err
 }
 
-// TODO: Add SQLITE_VARIABLE_LIMIT tests
+// Bulk 
 func (s *SQLiteStorage) BulkGet(addresses []string) ([]int64, error) {
 	if len(addresses) == 0 {
 		return nil, nil
 	}
-
+	//TODO: Use transact to wrap all batches 
 	// Split address into enough queries so SQLite3 SQLITE_VARIABLE_LIMIT
 	// isn't reached.
 	balance := make(map[string]int64, len(addresses))
@@ -342,61 +332,34 @@ func (s *SQLiteStorage) BulkGet(addresses []string) ([]int64, error) {
 
 
 // BulkUpdate Atomic bulk storage update
-// TODO: User real bulk inserts https://stackoverflow.com/questions/21108084/golang-mysql-insert-multiple-data-at-once
-// TODO: About transactions https://stackoverflow.com/questions/16184238/database-sql-tx-detecting-commit-or-rollback
-func (s *SQLiteStorage) BulkUpdate(insert []AddressBalancePair, 
-			   update []AddressBalancePair, 
-			   remove []string, height int64) (err error) {
+func (s *SQLiteStorage) BulkUpdate(updates []AddressBalancePair, 
+		height int64) (err error) {
 	
 	// Start transaction
-	tx, err := s.db.Beginx()
-	insertStmt := tx.Stmtx(s.bulkInsertStmt)
-	updateStmt := tx.Stmtx(s.bulkUpdateStmt)
-	removeStmt := tx.Stmtx(s.bulkDeleteStmt)
-	heightStmt := tx.Stmtx(s.setHeightStmt)
-
-	for _, pair := range insert {
-		if pair.Balance != 0 {
-			_, err = insertStmt.Exec(pair.Address, pair.Balance)
-			if err != nil {
-				log.Print(err)
-				tx.Rollback()
+	err = Transact(s.db, func (tx *sqlx.Tx) error {
+	
+		updateStmt := tx.Stmtx(s.updateStmt)
+		heightStmt := tx.Stmtx(s.setHeightStmt)
+		
+		for _, up := range updates {
+			if up.Balance == 0 {
+				continue
+			}
+			if _, err = updateStmt.Exec(up.Address, up.Balance); err != nil {
 				return err
 			}
 		}
-	}
 
-	for _, pair := range update {
-		if pair.Balance != 0 {
-			_, err = updateStmt.Exec(pair.Address, pair.Balance)
-		} else {
-			_, err = removeStmt.Exec(pair.Address)
-		}
-		if err != nil {
-			log.Print(err)
-			tx.Rollback()
+		if _, err = heightStmt.Exec(height); err != nil {
 			return err
 		}
-	}
-	
-	for _, addr := range remove {
-		
-		_, err = removeStmt.Exec(addr)
-		if err != nil {
-			log.Print(err)
-			tx.Rollback()
-			return err
-		}
-	}
+		return nil
+	})
 
-	_, err = heightStmt.Exec(height)
-	if err != nil {
-		log.Print(err)
-		tx.Rollback()
-		return err
+	if err != nil && err.Error() == "Negative balance" {
+		errMsg := fmt.Sprintf("Negative balance ant height %v", height)
+		return NewNegativeBalanceError(errMsg)
 	}
-
-	err = tx.Commit()
 	return err
 }
 

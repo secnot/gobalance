@@ -39,6 +39,10 @@ func (e *MockErrorStorage) Set(address string, value int64) (err error) {
 	return NewStorageError("Set()")
 }
 
+func (e *MockErrorStorage) Update(address string, value int64) (err error) {
+	return NewStorageError("Update()")
+}
+
 func (e *MockErrorStorage) Delete(address string) (err error) {
 	return NewStorageError("Delete()")
 }
@@ -51,9 +55,8 @@ func (e *MockErrorStorage) BulkGet(addresses []string) (balance []int64, err err
 	return nil, NewStorageError("MockBulkGetError")
 }
 
-func (e *MockErrorStorage) BulkUpdate(insert []AddressBalancePair, 
-			   update []AddressBalancePair, 
-			   remove []string, height int64) (err error) {
+func (e *MockErrorStorage) BulkUpdate(update []AddressBalancePair, 
+			   height int64) (err error) {
 	return NewStorageError("MockBulkUpdateError")
 }
 
@@ -68,8 +71,8 @@ func TestStorageProxyCacheStorageErrorGet(t *testing.T) {
 	}
 
 	value, err := cache.Get("random_address")
-	if err != nil {
-		t.Error("Get(): ", err)
+	if err == nil {
+		t.Error("Get(): Expected an error")
 	}
 	if value != 0 {
 		t.Error("Get() returned value should be 0 when there is an error")

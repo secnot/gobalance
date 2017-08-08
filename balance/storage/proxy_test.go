@@ -289,11 +289,11 @@ func TestStorageProxyUpdate(t *testing.T) {
 	cacheHasBalance(t, cache, "secret", 999)
 	storageHasBalance(t, storage, "secret", 999)
 	storageHasLen(t, storage, 1)
-	
+
 	cache.CacheClear()
 	cacheHasBalance(t, cache, "secret", 999)
 	storageHasBalance(t, storage, "secret", 999)
-
+	
 	// Reuse initialized storage for a new cache
 	/////////////////////////////////////////////
 	cache, _ = NewStorageProxyCache(storage, 10000)
