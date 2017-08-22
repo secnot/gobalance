@@ -164,6 +164,7 @@ func (s *StorageCache) BulkGetTxOut(ids []TxOutId) (outs []TxOutData, err error)
 func (s *StorageCache) AddTxOut(utxo primitives.TxOut) {
 	data := TxOutData{Addr: utxo.Addr, Value: utxo.Value}
 	id   := TxOutId{TxHash: *utxo.TxHash, Nout: utxo.Nout}
+	delete(s.deletions, id)
 	s.inserts[id] = data
 }
 
