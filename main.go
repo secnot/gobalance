@@ -13,6 +13,7 @@ import (
 	"github.com/secnot/gobalance/crawler"
 	"github.com/secnot/gobalance/balance"
 	"github.com/secnot/gobalance/balance/storage"
+	"github.com/secnot/gobalance/logger"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -21,7 +22,7 @@ import (
 
 func main() {
 	// Connect to local bitcoin core RPC server using HTTP POST mode.
-	connCfg := &btcrpcclient.ConnConfig{
+	rpcConf := btcrpcclient.ConnConfig{
 		Host:         "localhost:8332",
 		User:         "secnot",
 		Pass:         "12345",
@@ -29,17 +30,9 @@ func main() {
 		HTTPPostMode: true, // Bitcoin core only supports HTTP POST mode
 		DisableTLS:   true, // Bitcoin core does not provide TLS by default
 	}
-	// Notice the notification parameter is nil since notifications are
-	// not supported in HTTP POST mode.
-	client, err := btcrpcclient.New(connCfg, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	//defer client.Shutdown()
-
 
 	primitives.SelectChain(&chaincfg.MainNetParams)
-	blockCrawler := crawler.NewCrawler(client, 0)
+	blockCrawler := crawler.NewCrawler(rpcConf, 0) //TODO: Load height from db
 
 	// Balance
 	sqlStorage, err := storage.NewSQLiteStorage("./DB_balance.db")
@@ -50,7 +43,8 @@ func main() {
 	blockCrawler.Subscribe(balanceProc)
 
 	// Logging
-	blockCrawler.Subscribe(crawler.NewLogger())
+	logBlocks := logger.NewLogger()
+	blockCrawler.Subscribe(logBlocks)
 
 	blockCrawler.Start()
 

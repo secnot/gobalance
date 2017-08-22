@@ -5,8 +5,6 @@ import (
 	"log"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	//"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcrpcclient"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -79,16 +77,14 @@ func (e *ErrInvalidTx) Error() string {
 type TxOutCache struct {
 	//TODO: Substitute simplelru with a more efficient storage method
 	cache map[chainhash.Hash]TxRecord
-	rpc  *btcrpcclient.Client
 }
 
 
 // NewTxOutCache allocates a new empty cache
-func NewTxOutCache(client *btcrpcclient.Client) (*TxOutCache) {
+func NewTxOutCache() (*TxOutCache) {
 	
 	return &TxOutCache{
 		cache: make(map[chainhash.Hash]TxRecord),
-		rpc:  client,
 	}
 }
 

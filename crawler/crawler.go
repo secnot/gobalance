@@ -10,14 +10,12 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcrpcclient"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/secnot/gobalance/primitives"
 )
 
 
 const (
-	// Delay between failed request (in milliseconds)
-	RPCRetryDelay = 4000
-
 	// Max updates waitting to be processed
 	UpdateQueueSize = 10
 
@@ -62,23 +60,20 @@ type Crawler struct {
 	// Cached TxOuts 
 	cache *TxOutCache
 
-	// Initialized rpc client 
-	client *btcrpcclient.Client
-
 	// Callback 
 	subscribers []CrawlerObserver
 
 	// Height for the next block to retrieve
 	height uint64
 
-	// Top block height (last update)
-	top uint64
-
 	// Last N blocks (type: primitives.Block)
 	blockLog *queue.Queue
 
 	// pending subscriber updates
 	updates chan BlockUpdate
+
+	// Configuration for bitcoind RPC server
+	rpcConfig btcrpcclient.ConnConfig
 }
 
 
@@ -86,12 +81,11 @@ type Crawler struct {
 
 
 // NewCrawler: Allocate new crawler
-func NewCrawler(client *btcrpcclient.Client, height uint64) *Crawler {
+func NewCrawler(config btcrpcclient.ConnConfig, height uint64) *Crawler {
 	return &Crawler{
-		cache:       NewTxOutCache(client),
-		client:      client,
+		cache:       NewTxOutCache(),
+		rpcConfig:   config,
 		height:      height,
-		top:         0, 
 		subscribers: make([]CrawlerObserver, 0, 10),
 		updates:     make(chan BlockUpdate, UpdateQueueSize),
 		blockLog:    queue.New(),
@@ -102,49 +96,14 @@ func NewCrawler(client *btcrpcclient.Client, height uint64) *Crawler {
 // TODO: Concurrently retrieve blocks
 func (c *Crawler) rpcCrawler() {
 
-	retries := 0
+
+	fetch := NewFetcher(c.rpcConfig, c.height)
+
 	for {
-		if retries > 0 {
-			time.Sleep(RPCRetryDelay*time.Millisecond)
-		}
-
-		// If the height for the next block has passed the current top, poll
-		// for the new top until there is a new block
-		c.Lock()
-		top, height := c.top, c.height
-		c.Unlock()
-		if top < height {
-			if !c.updateBlockchainHeight() {
-				retries++
-				continue
-			}
-		}
-
-		// Fetch the next block
-		block, err := c.getBlock(height)
-		if err != nil {
-			log.Print(err)
-			retries++
-			continue
-		}
-
-		retries = 0 // Not a connection failure from this point on
-
-		// Check the new block is part of the current chain, if not
-		// backtrack one block and try again.
-		c.Lock()
-		lastBlock := c.blockLog.Back()
-		if lastBlock != nil && block.Header.PrevBlock != lastBlock.(*primitives.Block).Hash {
-			c.updates <- NewBlockUpdate(OP_BACKTRACK, lastBlock.(*primitives.Block))
-			c.blockLog.PopBack()
-			c.height--
-			c.Unlock()
-			continue
-		}
-		c.Unlock()
+		blockHash, block, height, err := fetch.GetNextBlock()
 
 		// Generate primitive.Block using txoutcache
-		pBlock, err := c.processBlock(block, height)
+		pBlock, err := c.processBlock(blockHash, block, height)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -161,41 +120,6 @@ func (c *Crawler) rpcCrawler() {
 	}
 }
 
-
-// update crawler blockchain top block height, returns true if the top was updated
-func (c *Crawler) updateBlockchainHeight() (updated bool) {
-	blockCount, err := c.client.GetBlockCount()
-	if err != nil {
-		log.Print(err)
-		return false
-	}
-
-	c.Lock()
-	if uint64(blockCount) > c.top {
-		c.top = uint64(blockCount)
-		updated = true
-	} else {	
-		updated = false
-	}
-	c.Unlock()
-	return
-}
-
-// get block of given height
-func (c *Crawler) getBlock(height uint64) (*wire.MsgBlock, error) {		
-	
-	blockHash, err := c.client.GetBlockHash(int64(c.height))
-	if err != nil {
-		return nil, err
-	}
-
-	block, err := c.client.GetBlock(blockHash)
-	if err != nil {
-		return nil, err
-	}
-	
-	return block, nil
-}
 
 // processTx
 func (c *Crawler) processTx(wireTx *wire.MsgTx) (*primitives.Tx, error){	
@@ -228,9 +152,15 @@ func (c *Crawler) processTx(wireTx *wire.MsgTx) (*primitives.Tx, error){
 }
 
 // processBlock generates a primitive.Block from wire.MsgBlock
-func (c *Crawler) processBlock(block *wire.MsgBlock, height uint64) (*primitives.Block, error) {
+func (c *Crawler) processBlock(blockHash *chainhash.Hash, block *wire.MsgBlock, height uint64) (*primitives.Block, error) {
 	prevHash := block.Header.PrevBlock
-	hash := block.BlockHash()
+
+	// Verify block hash
+	verifiedHash := block.BlockHash()
+	if verifiedHash != *blockHash {
+		log.Panic(verifiedHash, blockHash)
+	}
+
 
 	transactions := make([]*primitives.Tx, len(block.Transactions))
 
@@ -241,7 +171,7 @@ func (c *Crawler) processBlock(block *wire.MsgBlock, height uint64) (*primitives
 		}
 		transactions[n] = tx
 	}
-	pBlock := primitives.NewBlock(hash, prevHash, height)
+	pBlock := primitives.NewBlock(*blockHash, prevHash, height)
 	pBlock.Transactions = transactions
 
 	if pBlock.Height == 200000 {
@@ -268,7 +198,7 @@ func (c *Crawler) notifySubscribersRoutine() {
 }
 
 
-// Start crawling goroutine at given height
+// Start block crawler and subscriber notification goroutines.
 func (c *Crawler) Start() {
 	c.Lock()
 	c.Unlock()
@@ -276,11 +206,12 @@ func (c *Crawler) Start() {
 	go c.notifySubscribersRoutine()
 }
 
+// Stop crawler gracefully
 func (c *Crawler) Stop() {
 }
 
 
-// Attach another subscriber to crawler block updates
+// Subscribe to crawler block updates
 func (c *Crawler) Subscribe(subs CrawlerObserver) {
 	c.Lock()
 	c.subscribers = append(c.subscribers, subs)
