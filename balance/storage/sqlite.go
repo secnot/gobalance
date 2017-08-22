@@ -206,7 +206,7 @@ func (s *SQLiteStorage) Get(address string) (value int64, err error) {
 }
 
 // Delete address balance from storage, if the address
-// doesn't exist not error is returned.
+// doesn't exist no error is returned.
 func (s *SQLiteStorage) Delete(address string) (err error) {
 	_, err = s.deleteStmt.Exec(address)
 	return
