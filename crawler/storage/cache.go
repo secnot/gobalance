@@ -29,7 +29,7 @@ type StorageCache struct {
 }
 
 
-func NewStorageCache(sto Storage, cache_size int) (s *StorageCache, err error) {
+func NewStorageCache(sto Storage, size int) (s *StorageCache, err error) {
 	height, err := sto.GetHeight()
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func NewStorageCache(sto Storage, cache_size int) (s *StorageCache, err error) {
 
 	cache := StorageCache{
 		sto: sto,
-		cache: simplelru.NewLRUCache(cache_size, 10),
+		cache: simplelru.NewLRUCache(size, 10),
 		inserts: make(map[TxOutId]TxOutData, InitialQueueSize),
 		deletions: make(map[TxOutId]bool, InitialQueueSize),
 		height: height,

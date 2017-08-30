@@ -120,11 +120,22 @@ func (b *BalanceProcessor) delFromPending(block *primitives.Block) {
 // addBlock enques a new block
 func (b *BalanceProcessor) addBlock(block *primitives.Block) {
 
-	 b.Lock()
-	 b.addToPending(block)
-	 b.blockQueue.PushBack(block)
-	 b.height = int64(block.Height)
-	 b.Unlock()
+	b.Lock()
+	blockHeight := int64(block.Height)
+
+	// First Check block height is in sequest
+	if blockHeight < b.height + 1 {
+		return
+	} else if blockHeight > b.height +1 {
+		log.Panic("BalanceProcessor: Block %v:%v out of sequence (height: %v)", 
+		 		block.Hash, block.Height, b.height)
+	} else {
+	 	b.addToPending(block)
+	 	b.blockQueue.PushBack(block)
+	 	b.height = int64(block.Height)
+ 	}
+	
+	b.Unlock()
 }
 
 // storeOldestBlock dequeues and stores the oldest block
@@ -178,7 +189,7 @@ func (b *BalanceProcessor) NewBlock(block *primitives.Block) {
 	b.addBlock(block)
 
 	// Pop oldest block to send to storage, if it has enough confirmations
-	if b.blockQueue.Len() < crawler.BacktrackLogSize {
+	if b.blockQueue.Len() < crawler.BlockConfirmations {
 		return
 	}
 	b.storeOldestBlock()

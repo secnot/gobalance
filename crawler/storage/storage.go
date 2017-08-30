@@ -15,6 +15,12 @@ type TxOutId struct {
 	Nout uint32
 }
 
+func NewTxOutId(hash *chainhash.Hash, nout uint32) *TxOutId {
+	return &TxOutId{
+		TxHash: *hash,
+		Nout:   nout,
+	}
+}
 
 type TxOutData struct {
 
@@ -23,6 +29,13 @@ type TxOutData struct {
 
 	// Output value
 	Value   int64
+}
+
+func NewTxOutData(address string, value int64) *TxOutData {
+	return &TxOutData{
+		Addr:  address,
+		Value: value,
+	}
 }
 
 

@@ -12,7 +12,7 @@ import (
 
 const (
 	// Max Buffered blocks
-	BlockBufferSize = 10
+	BlockBufferSize = 100
 	
 	// Delay between failed requests retries (in milliseconds)
 	RPCRetryDelay = 4000
@@ -112,8 +112,7 @@ func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<
 			continue // Wait and retry
 		}
 	
-		// Verify block hash
-		// TODO: Use worker pool to verify block hash
+		// TODO: Verify block hash and retry
 		/*
 		verifiedHash := block.BlockHash()
 		if verifiedHash != *blockHash {
@@ -142,7 +141,7 @@ func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<
 			// Ready for next block
 			retries = 0
 			height += 1
-			log.Print(len(buffer))
+			//log.Print(len(buffer))
 		}
 	}
 }

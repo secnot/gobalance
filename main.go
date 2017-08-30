@@ -12,12 +12,14 @@ import (
 
 	"github.com/secnot/gobalance/crawler"
 	"github.com/secnot/gobalance/balance"
-	"github.com/secnot/gobalance/balance/storage"
+	bstorage "github.com/secnot/gobalance/balance/storage"
+	ustorage "github.com/secnot/gobalance/crawler/storage"
 	"github.com/secnot/gobalance/logger"
 	"github.com/secnot/gobalance/primitives"
 )
 
 
+// TODO: Catch ctrl-c and exit gracefully
 
 
 func main() {
@@ -31,15 +33,25 @@ func main() {
 		DisableTLS:   true, // Bitcoin core does not provide TLS by default
 	}
 
+	// Crawler
 	primitives.SelectChain(&chaincfg.MainNetParams)
-	blockCrawler := crawler.NewCrawler(rpcConf, 0) //TODO: Load height from db
-
-	// Balance
-	sqlStorage, err := storage.NewSQLiteStorage("./DB_balance.db")
+	utxoStorage, err := ustorage.NewSQLiteStorage("./DB_utxo.db")
 	if err != nil {
 		log.Panic(err)
 	}
-	balanceProc := balance.NewBalanceProcessor(sqlStorage, 200000)
+
+	//TODO: Load height from db?
+	blockCrawler, err := crawler.NewCrawler(rpcConf, 0, utxoStorage)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// Balance
+	balanceStorage, err := bstorage.NewSQLiteStorage("./DB_balance.db")
+	if err != nil {
+		log.Panic(err)
+	}
+	balanceProc := balance.NewBalanceProcessor(balanceStorage, 200000)
 	blockCrawler.Subscribe(balanceProc)
 
 	// Logging

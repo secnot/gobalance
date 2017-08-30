@@ -102,7 +102,6 @@ func NewTxOut(txHash *chainhash.Hash, nout uint32, address string, value int64) 
 	}
 }
 
-
 // PkScriptToAddr extracts the bitcoin address from a wire.TxOut.PkScript
 func PkScriptToAddr(pkScript []byte) string {
 	// See http://godoc.org/github.com/btcsuite/btcd/txscript#example-ExtractPkScriptAddrs
