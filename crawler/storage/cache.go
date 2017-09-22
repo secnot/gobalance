@@ -3,6 +3,7 @@ package storage
 import (
 	"github.com/secnot/simplelru"
 	"github.com/secnot/gobalance/primitives"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
 
@@ -24,13 +25,14 @@ type StorageCache struct {
 	// pending deletions
 	deletions map[TxOutId]bool
 
-	// This is the proxy height, not the stored height
+	// Heigh and has for the last block in cache (NOT THE SAME AS STORED)
 	height int64
+	hash chainhash.Hash
 }
 
 
 func NewStorageCache(sto Storage, size int) (s *StorageCache, err error) {
-	height, err := sto.GetHeight()
+	height, hash, err := sto.GetLastBlock()
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +43,7 @@ func NewStorageCache(sto Storage, size int) (s *StorageCache, err error) {
 		inserts: make(map[TxOutId]TxOutData, InitialQueueSize),
 		deletions: make(map[TxOutId]bool, InitialQueueSize),
 		height: height,
+		hash: hash,
 	}
 
 	return &cache, nil
@@ -75,6 +78,16 @@ func (s *StorageCache) SetHeight(height int64) {
 // GetHeight
 func (s *StorageCache) GetHeight() int64 {
 	return s.height
+}
+
+// SetHash sets last block hash
+func (s *StorageCache) SetHash(hash chainhash.Hash) {
+	s.hash = hash
+}
+
+// GetHash returns last block hash
+func (s *StorageCache) GetHash() chainhash.Hash {
+	return s.hash
 }
 
 // GetTxOut
@@ -181,6 +194,41 @@ func (s *StorageCache) DelTxOut(id TxOutId) {
 	s.deletions[id] = true
 }
 
+// AddBlock
+func (s *StorageCache) AddBlock(block *primitives.Block) error {
+	for _, tx := range block.Transactions {
+	
+		// Add transaction outputs to storage
+		for _, out := range tx.Out {
+			if out.Addr != "" && out.Value != 0 {
+				s.AddTxOut(*out)
+			}
+		}
+
+		// Delete transaction inputs from storage
+		for _, in := range tx.In {
+			s.DelTxOut(TxOutId{TxHash: *in.TxHash, Nout: in.Nout})
+		}
+	}
+		
+	// Update height
+	s.SetHeight(int64(block.Height))
+	s.SetHash(block.Hash)
+	return nil
+}
+
+// GetBalance returns the address balance
+func (s *StorageCache) GetBalance(address string) (int64, error) {
+	// TODO
+	storedBalance, err := s.sto.GetBalance(address)
+	if err != nil {
+		return -1, nil
+	}
+	
+	cachedBalance := int64(0)
+	return cachedBalance+storedBalance, nil
+}
+
 // Commit pending insertion, deletions, and height into storage
 func (s *StorageCache) Commit() (err error){
 
@@ -203,7 +251,8 @@ func (s *StorageCache) Commit() (err error){
 		toDelete = append(toDelete, id)	
 	}
 
-	err = s.sto.BulkUpdate(toInsert, toDelete, s.height)
+	//
+	err = s.sto.BulkUpdate(toInsert, toDelete, s.height, s.hash)
 	if err != nil {
 		return err
 	}

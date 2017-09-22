@@ -4,12 +4,18 @@ import (
 	"database/sql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/secnot/gobalance/primitives"
 )
 
-const (
-	SQLITE_VARIABLE_LIMIT = 999
-)
+
+type utxo struct {
+	TxHash []byte          `db:"tx"`   // Hash for the transaction containing the TxOut
+	Nout   uint32          `db:"nout"` // Output number
+	Addr   string          `db:"addr"` // Bitcoin address from pkScript
+	Value  int64           `db:"value"`// Output ammount
+}
+
 
 var SCHEMAS = [...]string {
 	`utxo 	(tx BLOB NOT NULL, 
@@ -17,8 +23,9 @@ var SCHEMAS = [...]string {
 			 addr text NOT NULL,
 			 value integer NOT NULL,
 			 PRIMARY KEY(tx, nout))`,
-	`height (pk integer NOT NULL,
+	`last_block (pk integer NOT NULL,
 			 height integer NOT NULL,
+			 hash BLOB NOT NULL,
 			 PRIMARY KEY(pk))`,
 }
 
@@ -27,7 +34,7 @@ var PRAGMAS = [...]string {
 	"PRAGMA cache_size=10000",
 	"PRAGMA synchronous=1", // NORMAL
 	"PRAGMA temp_store=2", // MEMORY (FILE is 1)
-	"PRAGMA journal_mode=MEMORY", // TODO: NOT SAFE Use only while syncing
+	"PRAGMA journal_mode=TRUNCATE", // MEMORY NOT SAFE Use only while syncing
 }
 
 var TRIGGERS = [...]string {	
@@ -44,6 +51,10 @@ var TRIGGERS = [...]string {
 	 for each row when new.value < 0 begin
 	 	SELECT RAISE(ABORT, 'Negative utxo');
 	 end`,
+}
+
+var INDEXES = [...]string {
+	`Utxo_Addr_Idx ON utxo(addr)`,
 }
 
 // InitDB: Opens or creates a SQLite DB and creates missing tables 
@@ -80,6 +91,15 @@ func initDB(driverName string, dataSource string) (db *sqlx.DB, err error){
 		}
     }
 
+    // Create indices
+    for _, index := range INDEXES {
+        index_sql := `CREATE INDEX IF NOT EXISTS `
+        _, err = db.Exec(index_sql+index+";")
+        if err != nil {
+            return nil, err
+        }
+    }
+
 	return db, nil
 }
 
@@ -96,10 +116,16 @@ type SQLiteStorage struct {
 
 	// Get statement with default value for empty
 	defaultGetStmt *sqlx.Stmt
-	
+
+	// Get all the txout for a given address
+	getByAddressStmt *sqlx.Stmt
+
+	// Get accumulated address balance
+	getBalanceStmt *sqlx.Stmt
+
 	// Height related statements
-	setHeightStmt *sqlx.Stmt
-	getHeightStmt *sqlx.Stmt
+	setLastBlockStmt *sqlx.Stmt
+	getLastBlockStmt *sqlx.Stmt
 }
 
 
@@ -147,12 +173,22 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 		return nil, err
 	}
 
-	store.getHeightStmt, err = db.Preparex("SELECT height FROM height WHERE pk=1;")
+	store.getLastBlockStmt, err = db.Preparex("SELECT height, hash FROM last_block WHERE pk=1;")
 	if err != nil {
 		return nil, err
 	}
-	
-	store.setHeightStmt, err = db.Preparex("INSERT OR REPLACE INTO height(pk, height) VALUES(1, ?);")
+
+	store.setLastBlockStmt, err = db.Preparex("INSERT OR REPLACE INTO last_block(pk, height, hash) VALUES(1, ?, ?);")
+	if err != nil {
+		return nil, err
+	}
+
+	store.getByAddressStmt, err = db.Preparex("SELECT tx, nout, addr, value FROM utxo WHERE addr=?;")
+	if err != nil {
+		return nil, err
+	}
+
+	store.getBalanceStmt, err = db.Preparex("SELECT coalesce(SUM(value), 0) FROM utxo WHERE addr=?;")
 	if err != nil {
 		return nil, err
 	}
@@ -163,32 +199,35 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 
 // Set address balance if the address exists it's modified, otherwise it's inserted
 func (s *SQLiteStorage) Len() (length int, err error) {
-	err = s.lenStmt.QueryRow().Scan(&length)
+	err = s.lenStmt.QueryRowx().Scan(&length)
 	return
 }
 
-// GetHeight gets current height, return error if none set
-func (s *SQLiteStorage) GetHeight() (height int64, err error) {
-	err = s.getHeightStmt.QueryRow().Scan(&height)
-	
+// GetLastBlock returns the height and hash for the last block committed
+func (s *SQLiteStorage) GetLastBlock() (height int64, hash chainhash.Hash, err error) {
+	var bHash []byte
+
+	err = s.getLastBlockStmt.QueryRowx().Scan(&height, &bHash)	
 	switch { 
 	case err == sql.ErrNoRows:
-		return -1, nil
+		return -1, primitives.ZeroHash, nil
 
 	case err != nil:
-		return -1, err
+		return -1, primitives.ZeroHash, err
 
 	default:
-		return height, nil
+		copy(hash[:], bHash)
+		return height, hash, nil
 	}
 }
 
-// SetHeight sets current height
-func (s *SQLiteStorage) SetHeight(height int64) (err error) {
-	if height < 0 {
+// SetLastBlock sets new last block deleting previous one
+func (s *SQLiteStorage) SetLastBlock(height int64, hash chainhash.Hash) (err error) {
+	if height <0 {
 		return ErrNegativeHeight
 	}
-	_, err = s.setHeightStmt.Exec(height)
+
+	_, err = s.setLastBlockStmt.Exec(height, hash[:])
 	return
 }
 
@@ -220,9 +259,36 @@ func (s *SQLiteStorage) Get(out TxOutId) (data TxOutData, err error) {
 	return 
 }
 
-// TODO: Add address index
+// GetByAddress returns wallet's unexpent txouts
 func (s *SQLiteStorage) GetByAddress(address string) (outs []primitives.TxOut, err error) {
-	return nil, nil
+	var utxos []utxo
+	err = s.getByAddressStmt.Select(&utxos, address)
+	if err != nil {
+		return nil, err
+	}
+
+	txouts := make([]primitives.TxOut, len(utxos))
+	for n, out := range utxos {
+		var hash chainhash.Hash
+		copy(hash[:], out.TxHash) 
+		txouts[n] = primitives.TxOut {
+			TxHash: &hash,
+			Nout: out.Nout,
+			Addr: out.Addr,
+			Value: out.Value,
+		}
+	}
+
+	return txouts[:], nil
+}
+
+// GetBalance returns address balance
+func (s *SQLiteStorage) GetBalance(address string) (balance int64, err error) {
+	err = s.getBalanceStmt.QueryRow(address).Scan(&balance)
+	if err != nil {
+		return -1, err
+	}
+	return balance, err
 }
 
 // Contains returns true if the db contains the address
@@ -304,16 +370,15 @@ func (s *SQLiteStorage) BulkGet(outs []TxOutId) (data []TxOutData, err error) {
 
 
 // BulkUpdate Atomic bulk storage update
-func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, height int64) (err error) {
-
+func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, height int64, hash chainhash.Hash) (err error) {
 	if height < 0 {
 		return ErrNegativeHeight
 	}
 
 	err = Transact(s.db, func(tx *sqlx.Tx) error {
-		setStmt    := tx.Stmtx(s.setStmt)
-		deleteStmt := tx.Stmtx(s.deleteStmt)
-		heightStmt := tx.Stmtx(s.setHeightStmt)
+		setStmt       := tx.Stmtx(s.setStmt)
+		deleteStmt    := tx.Stmtx(s.deleteStmt)
+		lastBlockStmt := tx.Stmtx(s.setLastBlockStmt)
 
 		// Insert new utxo
 		for _, ins := range insert {
@@ -336,8 +401,8 @@ func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, 
 			}
 		}
 
-		// Set new height
-		_, err = heightStmt.Exec(height)
+		// Set lastblock
+		_, err = lastBlockStmt.Exec(height, hash[:])
 		return err
 	})
 

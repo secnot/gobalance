@@ -7,12 +7,12 @@ package main
 import (
 	"log"
 	"time"
-	"github.com/btcsuite/btcrpcclient"
+	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/chaincfg"
 
 	"github.com/secnot/gobalance/crawler"
-	"github.com/secnot/gobalance/balance"
-	bstorage "github.com/secnot/gobalance/balance/storage"
+	//"github.com/secnot/gobalance/balance"
+	//bstorage "github.com/secnot/gobalance/balance/storage"
 	ustorage "github.com/secnot/gobalance/crawler/storage"
 	"github.com/secnot/gobalance/logger"
 	"github.com/secnot/gobalance/primitives"
@@ -24,7 +24,7 @@ import (
 
 func main() {
 	// Connect to local bitcoin core RPC server using HTTP POST mode.
-	rpcConf := btcrpcclient.ConnConfig{
+	rpcConf := rpcclient.ConnConfig{
 		Host:         "localhost:8332",
 		User:         "secnot",
 		Pass:         "12345",
@@ -41,19 +41,20 @@ func main() {
 	}
 
 	//TODO: Load height from db?
-	blockCrawler, err := crawler.NewCrawler(rpcConf, 0, utxoStorage)
+	blockCrawler, err := crawler.NewCrawler(rpcConf, utxoStorage)
 	if err != nil {
 		log.Panic(err)
 	}
 
 	// Balance
+	/*
 	balanceStorage, err := bstorage.NewSQLiteStorage("./DB_balance.db")
 	if err != nil {
 		log.Panic(err)
 	}
 	balanceProc := balance.NewBalanceProcessor(balanceStorage, 200000)
 	blockCrawler.Subscribe(balanceProc)
-
+	*/
 	// Logging
 	logBlocks := logger.NewLogger()
 	blockCrawler.Subscribe(logBlocks)

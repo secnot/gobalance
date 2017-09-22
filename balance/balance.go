@@ -2,6 +2,7 @@ package balance
 
 import (
 	"log"
+	"time"
 	"sync"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/secnot/gobalance/balance/storage"
@@ -13,7 +14,7 @@ const (
 	BalanceCacheSize = 100000
 
 	// Number of pending updates required to trigger a Commit
-	BalanceCommitSize = 400000
+	BalanceCommitSize = 800000
 )
 
 
@@ -29,6 +30,9 @@ type BalanceProcessor struct {
 	// Height of the last processed processed
 	height int64
 
+	// Last time a block was added 
+	lastTime time.Time
+	
 	// Accumulated balance updates for the blocks without enough confirmations 
 	// to be stored (by address)
 	pending map[string]int64
@@ -49,6 +53,7 @@ func NewBalanceProcessor(store storage.Storage, caseSize int) (balance *BalanceP
 	return &BalanceProcessor{
 		balance: storageCache,
 		height: storageCache.Height(),
+		lastTime: time.Now(),
 		blockQueue: queue.New(),
 		pending: make(map[string]int64),
 	}
@@ -195,9 +200,10 @@ func (b *BalanceProcessor) NewBlock(block *primitives.Block) {
 	b.storeOldestBlock()
 
 	// Commit only if there are enough pending updates in storage
-	// TODO: Don't accumulate updates if more than 5 minutes have passed
-	// since the last (ie .- initial sync has finished)
-	if b.balance.UncommittedLen() > BalanceCommitSize {
+	now := time.Now()
+	elapsed := now.Sub(b.lastTime).Minutes()
+	b.lastTime = now
+	if b.balance.UncommittedLen() > BalanceCommitSize || elapsed > 6.0 {
 		err := b.balance.Commit() 
 		if err != nil {
 			log.Panic("proxy.Commit(): ", err)

@@ -3,25 +3,25 @@ package crawler
 
 import (
 	"log"
+	"time"
 	_ "sync"
-	_ "time"
 	"errors"
 
-	"github.com/phf/go-queue/queue"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/secnot/gobalance/crawler/storage"
 )
 
 const (
-	UtxoCacheSize = 400000
+	UtxoCacheSize = 800000
 	
 	// Average number of transaction inputs in a block
 	AverageBlockInputs = 2048 * 10 // Transactions * Inputs
 
 	// Number of pending commits ve
-	StorageCommitSize = 400000
+	StorageCommitSize = 10000000
 )
 
 var ErrBacktrackLimit = errors.New("not found")
@@ -29,8 +29,11 @@ var ErrBacktrackLimit = errors.New("not found")
 
 type BlockManager struct {
 
-	// Last added block height
+	// Last block height
 	height int64
+
+	// Last time a block was added 
+	lastTime time.Time
 
 	// 
 	storageCache *storage.StorageCache
@@ -39,10 +42,7 @@ type BlockManager struct {
 	confirmations uint16
 
 	// Blocks waiting for enough confirmations before committing to storage
-	pendingBlocks *queue.Queue
-
-	// Transactions provided by pendingBlocks
-	pendingTx map[chainhash.Hash]*primitives.Tx
+	pendingBlocks *primitives.BlockQueue
 }
 
 // NewBlockManager
@@ -55,10 +55,10 @@ func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16) (
 	
 	manager := BlockManager {
 		height: 		cache.GetHeight(),
+		lastTime:       time.Now(),
 		storageCache:	cache,
 		confirmations:	confirmations,
-		pendingBlocks:	queue.New(),
-		pendingTx:   make(map[chainhash.Hash]*primitives.Tx),
+		pendingBlocks:	primitives.NewBlockQueue(),
 	}
 
 	return &manager, nil
@@ -88,34 +88,31 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 	
 	// Build all the block transactions (without inputs)
 	transactions := make([]*primitives.Tx, 0, len(block.Transactions))
-	transactionIdx := make(map[chainhash.Hash]*primitives.Tx, len(block.Transactions))
+	blockTxIdx := make(map[chainhash.Hash]*primitives.Tx, len(block.Transactions))
 	for _, wireTx := range block.Transactions {
 		tx := b.buildTx(wireTx)
 		transactions = append(transactions, tx)
-		transactionIdx[*tx.Hash] = tx
+		blockTxIdx[*tx.Hash] = tx
 	}
-
+	
 	// Find all the transaction inputs that need to be retrieved from storage
 	missingIns := make([]storage.TxOutId, 0, AverageBlockInputs)
-	inputCount := 0 // Number of inputs spent by the block transactions
 	
 	for _, wireTx := range block.Transactions {
 		for _, txIn := range wireTx.TxIn {
 
-			_, ok1 := b.pendingTx[txIn.PreviousOutPoint.Hash]
-			_, ok2 := transactionIdx[txIn.PreviousOutPoint.Hash]
-			
-			if !ok1 && !ok2 {
+			txInBlock := blockTxIdx[txIn.PreviousOutPoint.Hash]
+			txInQueue := b.pendingBlocks.Tx(txIn.PreviousOutPoint.Hash)
+
+			if txInBlock == nil && txInQueue == nil {
 				missingIns = append(missingIns, storage.TxOutId{
 					TxHash: txIn.PreviousOutPoint.Hash, 
 					Nout:   txIn.PreviousOutPoint.Index,})
 			}
-			inputCount += 1
 		}
 	}
 
-	// Load missing transactions from storage
-	log.Print(len(missingIns))
+	// Load missing transaction outputs from storage
 	missingData, err := b.storageCache.BulkGetTxOut(missingIns)
 	if err != nil {
 		return nil, err
@@ -126,13 +123,18 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 	var output *primitives.TxOut
 
 	for TxIdx := 0; TxIdx < len(block.Transactions); TxIdx += 1 {
-		
+	
+		// If it is coinbase transaction it has only one input
+		if blockchain.IsCoinBaseTx(block.Transactions[TxIdx]) {
+			continue
+		}
+
 		for _, wireTxIn := range block.Transactions[TxIdx].TxIn {
 
-			if tx, ok := b.pendingTx[wireTxIn.PreviousOutPoint.Hash]; ok {
+			if tx := b.pendingBlocks.Tx(wireTxIn.PreviousOutPoint.Hash); tx != nil {
 				// The input is an output from a pending block
 				output = tx.Out[wireTxIn.PreviousOutPoint.Index]
-			} else if tx, ok := transactionIdx[wireTxIn.PreviousOutPoint.Hash]; ok {
+			} else if tx := blockTxIdx[wireTxIn.PreviousOutPoint.Hash]; tx != nil {
 				// The input is an output from the current block
 				output = tx.Out[wireTxIn.PreviousOutPoint.Index]
 			} else {
@@ -153,82 +155,51 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 	return pBlock, nil
 }
 
-
-// storeBlock adds block outputs and removes blocks inputs to and from storage
-func (b *BlockManager) storeBlock(block *primitives.Block) error {
-	for _, tx := range block.Transactions {
-	
-		// Add transaction outputs to storage
-		for _, out := range tx.Out {
-			if out.Addr != "" && out.Value != 0 {
-				b.storageCache.AddTxOut(*out)
-			}
-		}
-
-		// Delete transaction inputs from storage
-		for _, in := range tx.In {
-			b.storageCache.DelTxOut(storage.TxOutId{TxHash: *in.TxHash, Nout: in.Nout})
-		}
-	}
-	return nil
-}
-
 // AddBlock adds a wire.Block to the manager returning primitives.Block equivalent
-func (b *BlockManager) AddBlock(block *wire.MsgBlock) (*primitives.Block, error) {
-
-	blockHash := block.BlockHash()
+func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) (*primitives.Block, error) {
 	
 	// Generate	block and add to pending
-	pBlock, err := b.buildBlock(&blockHash, block, uint64(b.height))
+	pBlock, err := b.buildBlock(blockHash, block, uint64(b.height+1))
 	if err != nil {
 		return nil, err
 	}
 	
 	b.pendingBlocks.PushBack(pBlock)
-	for _, tx := range pBlock.Transactions {
-		b.pendingTx[*tx.Hash] = tx
-	}
-	
+
 	// Update current height
 	b.height += 1
 
 	// Add confirmed block and height to storage cache
 	if b.pendingBlocks.Len() > int(b.confirmations) {
-		confirmedBlock := b.pendingBlocks.PopFront().(*primitives.Block)
-		b.storeBlock(confirmedBlock)
-		for _, tx := range confirmedBlock.Transactions {
-			delete(b.pendingTx, *tx.Hash)
-		}
-
-		// Update height
-		cacheHeight := b.storageCache.GetHeight()
-		b.storageCache.SetHeight(cacheHeight+1)
+		confirmedBlock := b.pendingBlocks.PopFront()
+		b.storageCache.AddBlock(confirmedBlock)
 	}
 
 	// Commit cache when there are enough changes
-	// TODO: or enough time has passed
-	if b.storageCache.UncommittedLen() > StorageCommitSize {
+	now := time.Now()
+	elapsed := now.Sub(b.lastTime).Minutes() // time since last block
+	if b.storageCache.UncommittedLen() > StorageCommitSize || elapsed > 2.0 {
+		
+		log.Print("Commit: ", b.storageCache.GetHeight())
 		err := b.storageCache.Commit()
 		if err != nil {
 			return nil, err
 		}
+		b.lastTime = time.Now() // In case commit was too slow
 	}
+	b.lastTime = now
 
 	return pBlock, nil
 }
 
-// BacktrackBlock
+// BacktrackBlock backtracks and returns last block
 func (b *BlockManager) BacktrackBlock() (*primitives.Block, error){
 	if b.pendingBlocks.Len() == 0 {
 		return nil, ErrBacktrackLimit
 	}
 
 	b.height -= 1
-
-	block := b.pendingBlocks.PopBack().(*primitives.Block)
-	for _, tx := range block.Transactions {
-		delete(b.pendingTx, *tx.Hash)
-	}
+	block := b.pendingBlocks.PopBack()
 	return block, nil
 }
 
@@ -237,5 +208,17 @@ func (b *BlockManager) Height() int64 {
 	return b.height
 }
 
+// GetBalance returns address balance
+func (b *BlockManager) GetBalance(address string) (int64, error) {
+	pendingBalance, ok := b.pendingBlocks.GetBalance(address)
+	if !ok {
+		pendingBalance = 0
+	}
+	storedBalance, err  := b.storageCache.GetBalance(address)
+	if err != nil  {
+		return 0, err
+	}
 
+	return pendingBalance + storedBalance, nil
+}
 

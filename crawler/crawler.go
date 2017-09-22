@@ -4,9 +4,9 @@ package crawler
 import (
 	"log"
 	"sync"
-	_ "time"
 
-	"github.com/btcsuite/btcrpcclient"
+	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/secnot/gobalance/crawler/storage"
 )
@@ -69,7 +69,10 @@ type Crawler struct {
 	updates chan BlockUpdate
 
 	// Configuration for bitcoind RPC server
-	rpcConfig btcrpcclient.ConnConfig
+	rpcConfig rpcclient.ConnConfig
+
+	// Hashes for the last unconfirmed blocks
+	blockQueue []chainhash.Hash
 }
 
 
@@ -77,18 +80,29 @@ type Crawler struct {
 
 
 // NewCrawler: Allocate new crawler
-func NewCrawler(config btcrpcclient.ConnConfig, height uint64, store storage.Storage) (*Crawler, error) {
+func NewCrawler(config rpcclient.ConnConfig, store storage.Storage) (*Crawler, error) {
+
+	lastHeight, lastHash, err := store.GetLastBlock()
+	if err != nil {
+		return nil, err
+	}
+
 	manager, err := NewBlockManager(store, TxOutCacheSize, BlockConfirmations)
 	if err != nil {
 		return nil, err
 	}
 
+	// Start crawling the next block
+	blockQueue := make([]chainhash.Hash, 0, BlockConfirmations)
+	blockQueue = append(blockQueue, lastHash)
+
 	return &Crawler{
 		rpcConfig:    config,
-		height:       height,
+		height:       uint64(lastHeight+1),
 		subscribers:  make([]CrawlerObserver, 0, 10),
 		updates:      make(chan BlockUpdate, UpdateQueueSize),
 		blockManager: manager,
+		blockQueue:   blockQueue,
 	}, nil
 }
 
@@ -100,16 +114,45 @@ func (c *Crawler) rpcCrawler() {
 	fetch := NewFetcher(c.rpcConfig, c.height)
 
 	for {
-		_, block, _, err := fetch.GetNextBlock()
-
-		pBlock, err := c.blockManager.AddBlock(block)
+		blockHash, block, _, err := fetch.GetNextBlock()
 		if err != nil {
-			log.Panic(err)
+			log.Print(err)
 		}
 		
-		c.updates <- NewBlockUpdate(OP_NEWBLOCK, pBlock)
-		
-		// TODO: backtrack when needed
+		// Verify the block hash and retry if there was a transmission error
+		verifiedHash := block.BlockHash()
+		if verifiedHash != *blockHash {
+			log.Print("Crawler: Invalid hash ", *blockHash, verifiedHash)
+			fetch.setHeight(c.height+1) // Fetch same block again
+			continue 
+		}
+
+		if block.Header.PrevBlock != c.blockQueue[len(c.blockQueue)-1] {
+			// BACKTRACK ONE BLOCK
+			if len(c.blockQueue) == 1 {
+				log.Print(block.Header.PrevBlock)
+				log.Print(c.blockQueue[len(c.blockQueue)-1])
+				log.Panic("Crawler: Backtrack limit reached")
+			}
+			pBlock, err := c.blockManager.BacktrackBlock()
+			if err != nil {
+				log.Panic(err)
+			}
+
+			fetch.setHeight(c.height) // Fetch previous block next
+			c.height -= 1
+			c.blockQueue = c.blockQueue[:len(c.blockQueue)-1]
+			c.updates <- NewBlockUpdate(OP_BACKTRACK, pBlock)
+		} else {
+			// ADD NEW BLOCK
+			pBlock, err := c.blockManager.AddBlock(block, &verifiedHash)
+			if err != nil {
+				log.Panic(err)
+			}
+			c.height += 1
+			c.blockQueue = append(c.blockQueue, *blockHash)
+			c.updates <- NewBlockUpdate(OP_NEWBLOCK, pBlock)
+		}
 	}
 }
 
@@ -140,7 +183,6 @@ func (c *Crawler) Start() {
 	go c.notifySubscribersRoutine()
 }
 
-// Stop crawler gracefully
 func (c *Crawler) Stop() {
 }
 

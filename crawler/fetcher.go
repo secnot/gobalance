@@ -6,13 +6,13 @@ import (
 	"sync"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcrpcclient"
+	"github.com/btcsuite/btcd/rpcclient"
 )
 
 
 const (
 	// Max Buffered blocks
-	BlockBufferSize = 100
+	BlockBufferSize = 50
 	
 	// Delay between failed requests retries (in milliseconds)
 	RPCRetryDelay = 4000
@@ -50,14 +50,14 @@ type Fetcher struct {
 	height uint64
 
 	// RPC service cofig
-	rpcConfig btcrpcclient.ConnConfig
+	rpcConfig rpcclient.ConnConfig
 }
 
 
 //
-func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<- blockRecord, stop chan struct{}) {
+func fetchingRoutine(config rpcclient.ConnConfig, height uint64, buffer chan<- blockRecord, stop chan struct{}) {
 
-	var client *btcrpcclient.Client
+	var client *rpcclient.Client
 	var err error
 	var topHeight uint64 = 0 // Height for the last block in the chain
 	
@@ -71,7 +71,7 @@ func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<
 	for {
 		// The notification parameter is nil since notifications are
 		// not supported in HTTP POST mode.
-		client, err = btcrpcclient.New(&config, nil)
+		client, err = rpcclient.New(&config, nil)
 		if err == nil {
 			break
 		}
@@ -108,20 +108,11 @@ func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<
 
 		block, err := client.GetBlock(blockHash)
 		if err != nil {
+			log.Print("Fetcher: GetBlock ", err)
 			retries++
 			continue // Wait and retry
 		}
 	
-		// TODO: Verify block hash and retry
-		/*
-		verifiedHash := block.BlockHash()
-		if verifiedHash != *blockHash {
-			log.Printf("Block hash validation error %v", blockHash)
-			retries++
-			continue // Wait and retry
-		}
-		*/
-
 		// Add the block to the buffer while waitting for a stop signal
 		record := blockRecord{
 			BlockHash: blockHash, 
@@ -141,7 +132,7 @@ func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<
 			// Ready for next block
 			retries = 0
 			height += 1
-			//log.Print(len(buffer))
+			log.Print(len(buffer))
 		}
 	}
 }
@@ -149,7 +140,7 @@ func fetchingRoutine(config btcrpcclient.ConnConfig, height uint64, buffer chan<
 
 
 // Create new fetcher
-func NewFetcher(config btcrpcclient.ConnConfig, height uint64) (f *Fetcher) {
+func NewFetcher(config rpcclient.ConnConfig, height uint64) (f *Fetcher) {
 	f = &Fetcher {rpcConfig: config, height: height}
 	f.setHeight(height)
 	return f
