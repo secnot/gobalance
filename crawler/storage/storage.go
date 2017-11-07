@@ -15,6 +15,12 @@ type TxOutId struct {
 	Nout uint32
 }
 
+func NewTxOutId(hash *chainhash.Hash, nout uint32) *TxOutId {
+	return &TxOutId{
+		TxHash: *hash,
+		Nout:   nout,
+	}
+}
 
 type TxOutData struct {
 
@@ -25,6 +31,13 @@ type TxOutData struct {
 	Value   int64
 }
 
+func NewTxOutData(address string, value int64) *TxOutData {
+	return &TxOutData{
+		Addr:  address,
+		Value: value,
+	}
+}
+
 
 // Memory and SQL storage interface:
 type Storage interface {
@@ -32,18 +45,21 @@ type Storage interface {
 	// Number of Utxo stored
 	Len() (length int, err error)
 	
-	// Get current height, return -1 if none stored
-	GetHeight() (height int64, err error)
-
-	// Set New height
-	SetHeight(height int64) (err error)
-
+	// Get last block height and hash (return -1, emptyHash if not stored)
+	GetLastBlock() (height int64, hash chainhash.Hash, err error)
+	
+	// Set last commited block height and hash
+	SetLastBlock(height int64, hash chainhash.Hash) (err error)
+	
 	// Get Utxo address and balance, or "", 0 if not stored
 	Get(out TxOutId) (data TxOutData, err error)
 
-	// Get all utxout for a given address
+	// Get all address utxout
 	GetByAddress(address string) (outs []primitives.TxOut, err error)
 
+	// Get address accumulated balance 
+	GetBalance(address string) (balance int64, err error)
+	
 	// Store new utxo
 	Set(out primitives.TxOut) (err error)
 
@@ -57,7 +73,7 @@ type Storage interface {
 	BulkGet(outs []TxOutId) (data []TxOutData, err error)
 
 	// Atomic bulk utxo insertion and deletion
-	BulkUpdate(insert []primitives.TxOut, remove []TxOutId, height int64) (err error)
+	BulkUpdate(insert []primitives.TxOut, remove []TxOutId, height int64, hash chainhash.Hash) (err error)
 }
 
 

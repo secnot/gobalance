@@ -46,7 +46,6 @@ func newAddressScriptHash(scriptHash []byte) btcutil.Address {
 	return addr
 }
 
-
 // Test against btcd test vectors on :
 // https://github.com/btcsuite/btcd/blob/master/txscript/standard_test.go
 func TestTxRecordOut(t *testing.T) {
@@ -336,6 +335,35 @@ func TestTxRecordOut(t *testing.T) {
 				errMsg := fmt.Sprintf("Expected empty address not %v", addr)
 				t.Error(errMsg)
 			}
+		}
+	}
+}
+
+// Test conversion of bitcoin txout value to string representation
+func TestBitcoinValueToString(t *testing.T) {
+	tests := map[int64]string {
+		-1:          "-0.00000001",
+		-9932000:    "-0.09932000",
+		-11111111:   "-0.11111111",
+		-156482800:  "-1.56482800",
+		-160392473:  "-1.60392473",
+		-1000000000: "-10.00000000",
+
+		0:           "0.00000000",
+		1:           "0.00000001",
+		9932000:     "0.09932000",
+		11111111:    "0.11111111",
+		156482800:   "1.56482800",
+		160392473:   "1.60392473",
+		1000000000:  "10.00000000",
+
+		10000000000000001:  "100000000.00000001",
+	}
+	
+	for value, expected := range tests {
+		if returned := BitcoinValueToString(value); returned != expected {
+			t.Errorf("BitcoinValueToString(%d): expecting %s returned %s", 
+				value, expected, returned)
 		}
 	}
 }

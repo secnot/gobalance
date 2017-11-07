@@ -71,6 +71,7 @@ func TestCacheLen(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
 	cache, _ := NewStorageCache(storage, 10000)
 	cache.SetHeight(100)
+	cache.SetHash(primitives.MainNetGenesisHash)
 
 	cacheLen(t, cache, 0)
 	cacheUncommittedLen(t, cache, 0)
@@ -155,17 +156,16 @@ func TestCacheLen(t *testing.T) {
 	cacheUncommittedLen(t, cache, 0)
 }
 
-// Test GetHeight and SetHeight methods
-func TestCacheGetHeight(t *testing.T) {
+
+// Test SetHash and GetHash methods
+func TestCacheGetHashHeight(t *testing.T) {
 	
-	// Test height loaded from uninitialized storage is -1
+	// Test height and hash are loaded from uninitialized storage.
 	storage, err := NewSQLiteStorage(":memory:")
 	if err != nil {
 		t.Error("NewSQLiteStorage(): ", err)
 		return
 	}
-
-	storageHeightIs(t, storage, -1) 
 
 	cache, err := NewStorageCache(storage, 10000)
 	if err != nil {
@@ -177,6 +177,11 @@ func TestCacheGetHeight(t *testing.T) {
 		t.Errorf("GetHeight(): Expected -1 returned %v", height) 
 		return
 	}
+	if hash := cache.GetHash(); hash != primitives.ZeroHash {
+		t.Errorf("GetHash(): expected %v, returned %v", 
+			primitives.ZeroHash, hash)
+		return
+	}
 
 	// Test height loaded from initialized storage
 	storage, err = NewSQLiteStorage(":memory:")
@@ -185,29 +190,38 @@ func TestCacheGetHeight(t *testing.T) {
 		return
 	}
 	
-	err = storage.SetHeight(999)
-	if err != nil {
-		t.Error("SetHeight(): ", err)
-		return
-	}
+	storage.SetLastBlock(999, primitives.MainNetGenesisHash)
 
 	cache, err = NewStorageCache(storage, 10000)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
 	}
-
+	
 	if height := cache.GetHeight(); height != 999 {
 		t.Errorf("GetHeight(): Expected 999 returned %v", height) 
 		return
 	}
+	if hash := cache.GetHash(); hash != primitives.MainNetGenesisHash {
+		t.Errorf("GetHash(): expected %v, returned %v", 
+			primitives.MainNetGenesisHash, hash)
+		return
+	}
+	cache.Commit()
 
-	// Set height and check before and after commit
+	// Set height and hash and check before and after commit
 	cache.SetHeight(2000)
+	cache.SetHash(primitives.ZeroHash)
 	if height := cache.GetHeight(); height != 2000 {
 		t.Errorf("GetHeight(): Expected 2000 returned %v", height)
 		return
+	}	
+	if hash := cache.GetHash(); hash != primitives.ZeroHash {
+		t.Errorf("GetHash(): expected %v, returned %v", 
+			primitives.ZeroHash, hash)
+		return
 	}
+
 
 	err = cache.Commit()
 	if err != nil {
@@ -218,17 +232,28 @@ func TestCacheGetHeight(t *testing.T) {
 		t.Errorf("GetHeight(): Expected 2000 returned %v", height)
 		return
 	}
+	if hash := cache.GetHash(); hash != primitives.ZeroHash {
+		t.Errorf("GetHash(): expected %v, returned %v", 
+			primitives.ZeroHash, hash)
+		return
+	}
 
 	// Check new height was commited to storage
-	height, err := storage.GetHeight()
+	height, hash, err := storage.GetLastBlock()
 	if err != nil {
-		t.Errorf("storage.GetHeight(): ", err)
+		t.Errorf("Unable to get last block from storage", err)
 	}
 	if height != 2000 {
-		t.Errorf("storage.GetHeight(): Expected 2000 returned %v", height)
+		t.Errorf("Commit() height failure expected 2000 stored %v", height)
+		return
+	}
+	if hash != primitives.ZeroHash {
+		t.Errorf("Commit() hash failure expected %v stored %v", primitives.ZeroHash, hash)
 		return
 	}
 }
+
+
 
 // Test Contains
 func TestCacheContains(t *testing.T) {
@@ -468,6 +493,8 @@ func TestCacheBulkGetTxOutDuplicates(t *testing.T) {
 func TestCacheAddTxOut(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
 	cache, _   := NewStorageCache(storage, 10000)
+	cache.SetHeight(1000)
+	cache.SetHash(primitives.MainNetGenesisHash)
 
 	// Add TxOut and check they are available before commit
 	outs   := mockTxOuts(1000, 2000, 2, 0)
@@ -508,6 +535,15 @@ func TestCacheAddTxOut(t *testing.T) {
 
 	for _, out := range outs[500:] {
 		cacheContains(t, cache, out)
+	}
+
+	// Check height and hash was committed to storage
+	height, hash, _ := storage.GetLastBlock()
+	if height != 1000 {
+		t.Error("Commit(): Height wasn't committed to storage")
+	}
+	if hash != primitives.MainNetGenesisHash {
+		t.Error("Commit(): Hash wasn't committed to storage")
 	}
 }
 
@@ -620,7 +656,6 @@ func TestCacheCommitErrors(t *testing.T) {
 		return
 	}
 
-
 	// Check negative height
 	storage, _ = NewSQLiteStorage(":memory:")
 	cache, _   = NewStorageCache(storage, 10000)
@@ -643,7 +678,6 @@ func TestCacheCommitErrors(t *testing.T) {
 	}
 	cache.AddTxOut(*negativeTxOut)
 
-
 	if err := cache.Commit(); err != ErrNegativeUtxo {
 		t.Error(err)
 		return
@@ -655,7 +689,8 @@ func TestCacheCommitErrors(t *testing.T) {
 		return
 	}
 
-	if h, err := storage.GetHeight(); err != nil || h != -1 {
+	height, hash, err := storage.GetLastBlock()
+	if err != nil || height != -1 || hash != primitives.ZeroHash {
 		t.Error("New height was written storage with a failed commit")
 		return
 	}
