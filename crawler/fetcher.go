@@ -3,24 +3,18 @@ package crawler
 import (
 	"log"
 	"time"
-	"sync"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 )
 
-
 const (
-	// Max Buffered blocks
-	BlockBufferSize = 50
-	
 	// Delay between failed requests retries (in milliseconds)
 	RPCRetryDelay = 4000
 
 	// RPC reconnect delay (in milliseconds)
 	RPCReconnectDelay = 30000
 )
-
 
 type blockRecord struct {
 	
@@ -34,39 +28,13 @@ type blockRecord struct {
 	Height uint64
 }
 
-
-
-type Fetcher struct {
-
-	sync.Mutex
-
-	// Used to signal fetching routine to stop (by closing)
-	stopSignal chan struct{}
-
-	// Buffered channel for fetched blocks
-	blockBuffer <-chan blockRecord
-
-	// Height for the last block returned
-	height uint64
-
-	// RPC service cofig
-	rpcConfig rpcclient.ConnConfig
-}
-
-
 //
-func fetchingRoutine(config rpcclient.ConnConfig, height uint64, buffer chan<- blockRecord, stop chan struct{}) {
+func fetcher(config rpcclient.ConnConfig, height uint64, buffer chan blockRecord, stop chan bool) {
 
 	var client *rpcclient.Client
 	var err error
 	var topHeight uint64 = 0 // Height for the last block in the chain
 	
-	if height < 0 {
-		log.Panic("Requested block with negative height")
-	}
-
-	// TODO: Check config in post mode
-
 	// Connect to rpc service
 	for {
 		// The notification parameter is nil since notifications are
@@ -76,7 +44,6 @@ func fetchingRoutine(config rpcclient.ConnConfig, height uint64, buffer chan<- b
 			break
 		}
 		
-		log.Print(err)
 		time.Sleep(RPCReconnectDelay*time.Millisecond)
 	}
 
@@ -132,58 +99,8 @@ func fetchingRoutine(config rpcclient.ConnConfig, height uint64, buffer chan<- b
 			// Ready for next block
 			retries = 0
 			height += 1
-			log.Print(len(buffer))
 		}
 	}
 }
 
-
-
-// Create new fetcher
-func NewFetcher(config rpcclient.ConnConfig, height uint64) (f *Fetcher) {
-	f = &Fetcher {rpcConfig: config, height: height}
-	f.setHeight(height)
-	return f
-}
-
-
-// Stop current fetchingRoutine and start a new one at another height
-func (f *Fetcher) setHeight(height uint64) {
-	
-	// Channels for the new fetching routine
-	signal := make(chan struct{})
-	buffer := make(chan blockRecord, BlockBufferSize)
-	
-	
-	f.Lock()
-
-	// Stop old fetching routine
-	if f.stopSignal != nil {
-		f.stopSignal <- struct{}{}
-	}
-
-	f.stopSignal  = signal
-	f.blockBuffer = buffer
-	f.height = height
-	go fetchingRoutine(f.rpcConfig, height, buffer, signal)
-	f.Unlock()
-}
-
-// Restart fetching at new height by discarding the current buffer and 
-// starting a new fetching goroutine. While the current fetching goroutine 
-// is closed
-func (f *Fetcher) ResetHeight(height uint64) {
-	f.setHeight(height)
-}
-
-// Retrieve next block in the chain or block until available
-func (f *Fetcher) GetNextBlock() (blockHash *chainhash.Hash, block *wire.MsgBlock, height uint64, err error) {		
-	record, ok := <- f.blockBuffer 
-	if !ok {
-		// channel closed and drained
-		return f.GetNextBlock()
-	}
-
-	return record.BlockHash, record.Block, record.Height, nil
-}
 

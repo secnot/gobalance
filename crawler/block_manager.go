@@ -4,7 +4,6 @@ package crawler
 import (
 	"log"
 	"time"
-	_ "sync"
 	"errors"
 
 	"github.com/btcsuite/btcd/wire"
@@ -15,8 +14,6 @@ import (
 )
 
 const (
-	UtxoCacheSize = 800000
-	
 	// Average number of transaction inputs in a block
 	AverageBlockInputs = 2048 * 10 // Transactions * Inputs
 
@@ -24,7 +21,7 @@ const (
 	StorageCommitSize = 10000000
 )
 
-var ErrBacktrackLimit = errors.New("not found")
+var ErrBacktrackLimit = errors.New("Backtrack limit reached")
 
 
 type BlockManager struct {
@@ -99,12 +96,17 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 	missingIns := make([]storage.TxOutId, 0, AverageBlockInputs)
 	
 	for _, wireTx := range block.Transactions {
+		if blockchain.IsCoinBaseTx(wireTx) {
+			continue
+		}
+
 		for _, txIn := range wireTx.TxIn {
 
 			txInBlock := blockTxIdx[txIn.PreviousOutPoint.Hash]
-			txInQueue := b.pendingBlocks.Tx(txIn.PreviousOutPoint.Hash)
+			txInQueue, _ := b.pendingBlocks.Tx(txIn.PreviousOutPoint.Hash)
 
 			if txInBlock == nil && txInQueue == nil {
+				// Transaction not in current block or cached.
 				missingIns = append(missingIns, storage.TxOutId{
 					TxHash: txIn.PreviousOutPoint.Hash, 
 					Nout:   txIn.PreviousOutPoint.Index,})
@@ -131,7 +133,7 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 
 		for _, wireTxIn := range block.Transactions[TxIdx].TxIn {
 
-			if tx := b.pendingBlocks.Tx(wireTxIn.PreviousOutPoint.Hash); tx != nil {
+			if tx, _ := b.pendingBlocks.Tx(wireTxIn.PreviousOutPoint.Hash); tx != nil {
 				// The input is an output from a pending block
 				output = tx.Out[wireTxIn.PreviousOutPoint.Index]
 			} else if tx := blockTxIdx[wireTxIn.PreviousOutPoint.Hash]; tx != nil {
@@ -148,7 +150,8 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 			}
 			transactions[TxIdx].AddIn(output)
 		}
-	}
+	}	
+
 
 	pBlock := primitives.NewBlock(*bHash, block.Header.PrevBlock, height)
 	pBlock.Transactions = transactions

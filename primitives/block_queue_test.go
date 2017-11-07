@@ -264,8 +264,8 @@ func TestQueueTxIndex(t *testing.T) {
 
 	// Add blocks and check transactions
 	queue.PushBack(block1)
-	tx1 := queue.Tx(*hash1)
-	tx2 := queue.Tx(*hash2)
+	tx1, _ := queue.Tx(*hash1)
+	tx2, _ := queue.Tx(*hash2)
 	if tx1 == nil {
 		t.Errorf("Tx(%v): Transaction wasn't indexed", *hash1)
 		return
@@ -276,8 +276,8 @@ func TestQueueTxIndex(t *testing.T) {
 	}
 
 	queue.PushFront(block2)
-	tx1 = queue.Tx(*hash1)
-	tx2 = queue.Tx(*hash2)
+	tx1, _ = queue.Tx(*hash1)
+	tx2, _ = queue.Tx(*hash2)
 	if tx1 == nil {
 		t.Errorf("Tx(%v): Transaction wasn't indexed", *hash1)
 		return
@@ -289,8 +289,8 @@ func TestQueueTxIndex(t *testing.T) {
 
 	// Remove blocks and check transactions
 	queue.PopBack()
-	tx1 = queue.Tx(*hash1)
-	tx2 = queue.Tx(*hash2)
+	tx1, _ = queue.Tx(*hash1)
+	tx2, _ = queue.Tx(*hash2)
 	if tx1 != nil {
 		t.Errorf("Tx(%v): Transaction wasn't indexed", *hash1)
 		return
@@ -302,8 +302,8 @@ func TestQueueTxIndex(t *testing.T) {
 
 
 	queue.PopFront()
-	tx1 = queue.Tx(*hash1)
-	tx2 = queue.Tx(*hash2)		
+	tx1, _ = queue.Tx(*hash1)
+	tx2, _ = queue.Tx(*hash2)		
 	if tx1 != nil {
 		t.Errorf("Tx(%v): Transaction shouldn't be indexed", *hash1)
 		return
@@ -313,3 +313,157 @@ func TestQueueTxIndex(t *testing.T) {
 		return
 	}
 }
+
+// Test transactions are only indexed once when an address appears more than once in
+// the same transaction.
+func TestQueueTxIndexOnce(t *testing.T) {
+
+	tx1Hash := mockHash(1)
+	tx2Hash := mockHash(2)
+	tx3Hash := mockHash(3)
+
+	addr1 := mockAddress(1)
+	addr2 := mockAddress(2)
+	addr3 := mockAddress(3)
+
+
+	// Tx1
+	tx1 := NewTx(&tx1Hash)
+	
+	tx1Out1 := NewTxOut(&tx1Hash, 0, addr1, 10)
+	tx1Out2 := NewTxOut(&tx1Hash, 1, addr1, 20)
+	tx1Out3 := NewTxOut(&tx1Hash, 2, addr2, 10)
+	tx1.AddOut(tx1Out1)
+	tx1.AddOut(tx1Out2)
+	tx1.AddOut(tx1Out3)
+
+	tx1In := NewTxOut(&tx3Hash, 0, addr1, 5)
+	tx1.AddIn(tx1In)
+
+	// Tx2
+	tx2 := NewTx(&tx2Hash)
+	tx2Out := NewTxOut(&tx2Hash, 0, addr2, 10)
+	tx2.AddOut(tx2Out)
+
+	tx2In  := NewTxOut(&tx3Hash, 0, addr3, 5)
+	tx2.AddIn(tx2In)
+	
+	// Block
+	block := NewBlock(MainNetGenesisHash, ZeroHash, 2)
+
+	block.AddTx(tx1)
+	block.AddTx(tx2)
+
+	// Populate queue
+	queue := NewBlockQueue()
+	queue.PushBack(block)
+	
+	// Check addr1
+	addr1Tx := queue.GetTx(addr1)
+	if len(addr1Tx) != 1 {
+		t.Errorf("queue.GetTx(): Expencting 1 transaction, returned %v", len(addr1Tx))
+	}
+
+	if addr1Tx[0] != tx1 {
+		t.Errorf("queue.GetTx()[0]: Unexpected transaction")
+	}
+
+	// Check addr2
+	addr2Tx := queue.GetTx(addr2)
+	if len(addr2Tx) != 2 {
+		t.Errorf("queue.GetTx(): Expencting 2 transaction, returned %v", len(addr2Tx))
+	}
+	
+	if addr2Tx[0] != tx1 {
+		t.Errorf("queue.GetTx()[0]: Unexpected transaction")
+	}
+	if addr2Tx[1] != tx2 {
+		t.Errorf("queue.GetTx()[1]: Unexpected transaction")
+	}
+
+	// Check balance
+	if balance, ok := queue.GetBalance(addr1); balance != 25 || ok != true {
+		t.Errorf("queue.GetBalance(%v): expecting 25 returned %v", addr1, balance)
+	}
+
+	if balance, ok := queue.GetBalance(addr2); balance != 20 || ok != true {
+		t.Errorf("queue.GetBalance(%v): expecting 20 returned %v", addr1, balance)
+	}
+	
+	if balance, ok := queue.GetBalance(addr3); balance != -5 || ok != true{
+		t.Errorf("queue.GetBalance(%v): expecting -5 returned %v", addr1, balance)
+	}
+
+
+	// Remove block and check again
+	retBlock := queue.PopFront()
+	if retBlock != block {
+		t.Error("queue.PopFront(): returned unexpected block")
+	}	
+	
+	if len(queue.GetTx(addr2)) != 0 {
+		t.Errorf("queue.GetTx(): Expencting 2 transaction, returned %v", len(addr2Tx))
+	}
+	
+	if len(queue.GetTx(addr1)) != 0 {
+		t.Errorf("queue.GetTx(): Expencting 1 transaction, returned %v", len(addr1Tx))
+	}
+	
+	if balance, ok := queue.GetBalance(addr1); balance != 0 || ok != false{
+		t.Errorf("queue.GetBalance(%v): expecting 0 returned %v", addr1, balance)
+	}
+
+	if balance, ok := queue.GetBalance(addr2); balance != 0 || ok != false {
+		t.Errorf("queue.GetBalance(%v): expecting 0 returned %v", addr1, balance)
+	}
+	
+	if balance, ok := queue.GetBalance(addr3); balance != 0 || ok != false{
+		t.Errorf("queue.GetBalance(%v): expecting 0 returned %v", addr1, balance)
+	}
+}
+
+func TestQueueBack(t *testing.T) {
+	// Test an empty queue returns nil
+	queue := NewBlockQueue()
+	if queue.Back() != nil {
+		t.Error("queue.Back(): Should have returned nil")
+	}
+
+	block1, block2 := initBlocks()
+	queue.PushFront(block1)
+	if queue.Back() != block1 {
+		t.Error("queue.Back(): returned unexpected block")
+	}
+	
+	queue.PushFront(block2)
+	if queue.Back() != block1 {
+		t.Error("queue.Back(): returned unexpected block")
+	}
+}
+
+
+func testQueueFront(t *testing.T) {
+	// Test an empty queue returns nil
+	queue := NewBlockQueue()
+	if queue.Front() != nil {
+		t.Error("queue.Front(): Should have returned nil")
+	}
+
+	block1, block2 := initBlocks()
+	queue.PushBack(block1)
+	if queue.Front() != block1 {
+		t.Error("queue.Back(): returned unexpected block")
+	}
+	
+	queue.PushBack(block2)
+	if queue.Front() != block1 {
+		t.Error("queue.Back(): returned unexpected block")
+	}
+
+	queue.PopFront()
+	if queue.Front() != block2 {
+		t.Error("queue.Back(): returned unexpected block")
+	}
+}
+
+

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"log"
 	"database/sql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -288,6 +289,13 @@ func (s *SQLiteStorage) GetBalance(address string) (balance int64, err error) {
 	if err != nil {
 		return -1, err
 	}
+	outs, _ := s.GetByAddress(address)
+	sum := int64(0)
+	for _, out := range outs {
+		log.Printf("%s - %s", out.TxHash, primitives.BitcoinValueToString(out.Value))
+		sum += out.Value
+	}
+	log.Printf("Sum: %s", primitives.BitcoinValueToString(sum))
 	return balance, err
 }
 

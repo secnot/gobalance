@@ -6,64 +6,102 @@ package main
 
 import (
 	"log"
-	"time"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/chaincfg"
 
 	"github.com/secnot/gobalance/crawler"
-	//"github.com/secnot/gobalance/balance"
-	//bstorage "github.com/secnot/gobalance/balance/storage"
-	ustorage "github.com/secnot/gobalance/crawler/storage"
-	"github.com/secnot/gobalance/logger"
+	"github.com/secnot/gobalance/crawler/storage"
+	"github.com/secnot/gobalance/recent_tx"
+	"github.com/secnot/gobalance/balance"
+	"github.com/secnot/gobalance/height"
 	"github.com/secnot/gobalance/primitives"
+	"github.com/secnot/gobalance/api"
+	"github.com/secnot/gobalance/config"
+)
+
+const (
+	DbFilename = "utxo.db"
 )
 
 
 // TODO: Catch ctrl-c and exit gracefully
-
+func ExitHandler(c chan os.Signal) {
+	for sig := range c {
+		crawler.Stop()
+		log.Print("Exit: ", sig)
+		os.Exit(1)
+	}
+}
 
 func main() {
+
+	// Load default config
+	conf, err := config.LoadConfig()
+	if err != nil {
+		log.Panic(err)
+	}
+
 	// Connect to local bitcoin core RPC server using HTTP POST mode.
 	rpcConf := rpcclient.ConnConfig{
-		Host:         "localhost:8332",
-		User:         "secnot",
-		Pass:         "12345",
+		Host:         conf["bitcoind.host"].(string),
+		User:         conf["bitcoind.user"].(string),
+		Pass:         conf["bitcoind.pass"].(string),
 		DisableAutoReconnect: false,
 		HTTPPostMode: true, // Bitcoin core only supports HTTP POST mode
 		DisableTLS:   true, // Bitcoin core does not provide TLS by default
 	}
 
-	// Crawler
-	primitives.SelectChain(&chaincfg.MainNetParams)
-	utxoStorage, err := ustorage.NewSQLiteStorage("./DB_utxo.db")
+
+	// Configure bitcoind server parameters
+	chain := conf["bitcoind.chain"]
+	switch chain {
+	case "mainnet":
+		primitives.SelectChain(&chaincfg.MainNetParams)	
+	case "testnet3":
+		primitives.SelectChain(&chaincfg.TestNet3Params)
+	default:
+		log.Panicf("Unsupported bitcoind.chain %v", chain)
+	}
+
+	// Initialize utxo storage 
+	dbPath := filepath.Join(conf["workdir"].(string), DbFilename)
+	expDbPath, err := filepath.Abs(os.Expand(dbPath, os.Getenv))
+	if err != nil {
+		log.Panic(err)
+	}
+	
+	utxoStorage, err := storage.NewSQLiteStorage(expDbPath)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	//TODO: Load height from db?
-	blockCrawler, err := crawler.NewCrawler(rpcConf, utxoStorage)
-	if err != nil {
-		log.Panic(err)
-	}
+	// Launch Crawler
+	go crawler.Crawler(rpcConf, utxoStorage)
 
-	// Balance
-	/*
-	balanceStorage, err := bstorage.NewSQLiteStorage("./DB_balance.db")
-	if err != nil {
-		log.Panic(err)
-	}
-	balanceProc := balance.NewBalanceProcessor(balanceStorage, 200000)
-	blockCrawler.Subscribe(balanceProc)
-	*/
-	// Logging
-	logBlocks := logger.NewLogger()
-	blockCrawler.Subscribe(logBlocks)
+	// Launch balance cache routine
+	go balance.BalanceRoutine(int(conf["balance_cache_size"].(int64)))
 
-	blockCrawler.Start()
+	// Launch recent transactions routine
+	go recent.RecentTxRoutine(uint16(conf["recent_blocks"].(int64)))
 
-	// TODO: Subscribe balance and other services
-	for {
-		time.Sleep(10000*time.Second)
-	}
+	// Launch height routine
+	go height.HeightRoutine()
+
+	// Catch interrupts to exit gracefully
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go ExitHandler(c)
+
+	// Start crawler
+	crawler.Start()
+
+	// Launch JSON API
+	bind := fmt.Sprint("%v:%v", conf["api.bind"].(string), conf["api.port"].(int64))
+	api.StartApi(bind, conf["api.url_prefix"].(string))
 }
 
