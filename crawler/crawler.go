@@ -14,12 +14,6 @@ import (
 
 
 const (
-	// Confirmations required for a block to be eligible to commit to storage
-	BlockConfirmations = 30
-
-	// Cache size
-	TxOutCacheSize = 500000
-	
 	// Max Buffered blocks
 	FetcherBlockBufferSize = 50	
 
@@ -117,20 +111,20 @@ type CrawlerData struct {
 }
 
 // NewCrawler: Allocate new crawler
-func newCrawlerData(config rpcclient.ConnConfig, store storage.Storage) (*CrawlerData, error) {
+func newCrawlerData(config rpcclient.ConnConfig, store storage.Storage, txOutCacheSize int, blockConfirmations uint16) (*CrawlerData, error) {
 
 	lastStoredHeight, lastStoredHash, err := store.GetLastBlock()
 	if err != nil {
 		return nil, err
 	}
 
-	manager, err := NewBlockManager(store, TxOutCacheSize, BlockConfirmations)
+	manager, err := NewBlockManager(store, txOutCacheSize, blockConfirmations)
 	if err != nil {
 		return nil, err
 	}
 
 	// Start crawling the next block
-	blockQueue := make([]chainhash.Hash, 0, BlockConfirmations)
+	blockQueue := make([]chainhash.Hash, 0, blockConfirmations)
 	blockQueue = append(blockQueue, lastStoredHash)
 
 	return &CrawlerData{
@@ -235,9 +229,9 @@ func (c *CrawlerData) delSubscriber(subscriber UpdateChan) {
 }
 
 // Crawler routine
-func Crawler(config rpcclient.ConnConfig, store storage.Storage) {
+func Crawler(config rpcclient.ConnConfig, store storage.Storage, utxoCacheSize int, blockConfirmations uint16) {
 
-	crawler, _ := newCrawlerData(config, store)
+	crawler, _ := newCrawlerData(config, store, utxoCacheSize, blockConfirmations)
 
 	// Start logging routine for new blocks and backtracks
 	go Logger()

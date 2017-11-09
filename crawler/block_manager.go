@@ -16,9 +16,6 @@ import (
 const (
 	// Average number of transaction inputs in a block
 	AverageBlockInputs = 2048 * 10 // Transactions * Inputs
-
-	// Number of pending commits ve
-	StorageCommitSize = 10000000
 )
 
 var ErrBacktrackLimit = errors.New("Backtrack limit reached")
@@ -31,6 +28,9 @@ type BlockManager struct {
 
 	// Last time a block was added 
 	lastTime time.Time
+
+	// Max number of txout cached in memory before a commit is forced
+	commitSize int
 
 	// 
 	storageCache *storage.StorageCache
@@ -54,6 +54,7 @@ func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16) (
 		height: 		cache.GetHeight(),
 		lastTime:       time.Now(),
 		storageCache:	cache,
+		commitSize:     cacheSize,
 		confirmations:	confirmations,
 		pendingBlocks:	primitives.NewBlockQueue(),
 	}
@@ -181,9 +182,9 @@ func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 	// Commit cache when there are enough changes
 	now := time.Now()
 	elapsed := now.Sub(b.lastTime).Minutes() // time since last block
-	if b.storageCache.UncommittedLen() > StorageCommitSize || elapsed > 2.0 {
+	if b.storageCache.UncommittedLen() > b.commitSize || elapsed > 2.0 {
 		
-		log.Print("Commit: ", b.storageCache.GetHeight())
+		log.Print("Commit: ", b.storageCache.GetHeight(), b.storageCache.UncommittedLen(), b.commitSize)
 		err := b.storageCache.Commit()
 		if err != nil {
 			return nil, err

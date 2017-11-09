@@ -56,7 +56,6 @@ func main() {
 		DisableTLS:   true, // Bitcoin core does not provide TLS by default
 	}
 
-
 	// Configure bitcoind server parameters
 	chain := conf["bitcoind.chain"]
 	switch chain {
@@ -81,7 +80,9 @@ func main() {
 	}
 
 	// Launch Crawler
-	go crawler.Crawler(rpcConf, utxoStorage)
+	go crawler.Crawler(rpcConf, utxoStorage, 
+		int(conf["utxo_cache_size"].(int64)), 
+		uint16(conf["recent_blocks"].(int64)))
 
 	// Launch balance cache routine
 	go balance.BalanceRoutine(int(conf["balance_cache_size"].(int64)))
