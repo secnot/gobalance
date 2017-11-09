@@ -198,8 +198,7 @@ func (s *StorageCache) AddTxOut(utxo primitives.TxOut) {
 		return
 	}
 	
-	data := TxOutData{Addr: utxo.Addr, Value: utxo.Value}
-	s.inserts[id] = data
+	s.inserts[id] = TxOutData{Addr: utxo.Addr, Value: utxo.Value}
 }
 
 // DelTxOut queues TxOutId for deletion from storage
