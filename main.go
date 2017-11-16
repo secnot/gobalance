@@ -69,12 +69,12 @@ func main() {
 
 	// Initialize utxo storage 
 	dbPath := filepath.Join(conf["workdir"].(string), DbFilename)
-	expDbPath, err := filepath.Abs(os.Expand(dbPath, os.Getenv))
+	absDbPath, err := filepath.Abs(os.Expand(dbPath, os.Getenv))
 	if err != nil {
 		log.Panic(err)
 	}
 	
-	utxoStorage, err := storage.NewSQLiteStorage(expDbPath)
+	utxoStorage, err := storage.NewSQLiteStorage(absDbPath)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -97,6 +97,8 @@ func main() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go ExitHandler(c)
+
+	log.Print("Launched")
 
 	// Start crawler
 	crawler.Start()
