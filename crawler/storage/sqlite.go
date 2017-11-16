@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"log"
 	"database/sql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -17,7 +16,6 @@ type utxo struct {
 	Value  int64           `db:"value"`// Output ammount
 }
 
-
 var SCHEMAS = [...]string {
 	`utxo 	(tx BLOB NOT NULL, 
 			 nout integer NOT NULL,
@@ -31,11 +29,13 @@ var SCHEMAS = [...]string {
 }
 
 var PRAGMAS = [...]string {	
-	"PRAGMA page_size=8192",
-	"PRAGMA cache_size=10000",
-	"PRAGMA synchronous=1", // NORMAL
+	"PRAGMA page_size=4096",
+	"PRAGMA cache_size=-100000", // 100MB Cache
+	"PRAGMA locking_mode=EXCLUSIVE",
+	"PRAGMA auto_vacuum=NONE", // NONE, INCREMENTAL, FULL
+	"PRAGMA synchronous=NORMAL", // NORMAL
 	"PRAGMA temp_store=2", // MEMORY (FILE is 1)
-	"PRAGMA journal_mode=TRUNCATE", // MEMORY NOT SAFE Use only while syncing
+	"PRAGMA journal_mode=TRUNCATE", // WAL, TRUNCATE, MEMORY
 }
 
 var TRIGGERS = [...]string {	
@@ -292,10 +292,8 @@ func (s *SQLiteStorage) GetBalance(address string) (balance int64, err error) {
 	outs, _ := s.GetByAddress(address)
 	sum := int64(0)
 	for _, out := range outs {
-		log.Printf("%s - %s", out.TxHash, primitives.BitcoinValueToString(out.Value))
 		sum += out.Value
 	}
-	log.Printf("Sum: %s", primitives.BitcoinValueToString(sum))
 	return balance, err
 }
 
@@ -388,6 +386,14 @@ func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, 
 		deleteStmt    := tx.Stmtx(s.deleteStmt)
 		lastBlockStmt := tx.Stmtx(s.setLastBlockStmt)
 
+		// Delete expent utxo
+		for _, rem := range remove {
+			_, err = deleteStmt.Exec(rem.TxHash[:], rem.Nout)
+			if err != nil {
+				return err
+			}
+		}
+
 		// Insert new utxo
 		for _, ins := range insert {
 			_, err = setStmt.Exec(ins.TxHash[:], ins.Nout, ins.Addr, ins.Value)
@@ -397,14 +403,6 @@ func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, 
 				} else if err.Error() == "Unexpendable utxo" {
 					err = ErrUnexpendableUtxo
 				}
-				return err
-			}
-		}
-
-		// Delete expent utxo
-		for _, rem := range remove {
-			_, err = deleteStmt.Exec(rem.TxHash[:], rem.Nout)
-			if err != nil {
 				return err
 			}
 		}

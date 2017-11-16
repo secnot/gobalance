@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"github.com/secnot/simplelru"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
@@ -13,12 +12,6 @@ const (
 type StorageCache struct {
 	// 
 	sto Storage
-
-	// Storage cache TxOutId -> TxOutData
-	cache *simplelru.LRUCache
-
-	// Max cache elements
-	cacheSize int
 
 	// pending inserts
 	inserts map[TxOutId]TxOutData
@@ -35,7 +28,7 @@ type StorageCache struct {
 }
 
 
-func NewStorageCache(sto Storage, size int) (s *StorageCache, err error) {
+func NewStorageCache(sto Storage) (s *StorageCache, err error) {
 	height, hash, err := sto.GetLastBlock()
 	if err != nil {
 		return nil, err
@@ -43,8 +36,6 @@ func NewStorageCache(sto Storage, size int) (s *StorageCache, err error) {
 
 	cache := StorageCache{
 		sto:       sto,
-		cache:     simplelru.NewLRUCache(size, 10),
-		cacheSize: size,
 		inserts:   make(map[TxOutId]TxOutData, InitialQueueSize),
 		deletions: make(map[TxOutId]bool, InitialQueueSize),
 		balance:   make(map[string]int64, InitialQueueSize),
@@ -69,11 +60,6 @@ func (s *StorageCache) Len() (length int, err error){
 // UncommitedLen returns the number of uncommitted inserts+deletions
 func (s *StorageCache) UncommittedLen() (size int) {
 	return len(s.inserts) + len(s.deletions)
-}
-
-// CleanCache
-func (s *StorageCache) CleanCache() {
-	s.cache.Purge()
 }
 
 // SetHeight sets new storage height
@@ -109,10 +95,6 @@ func (s *StorageCache) GetTxOut(id TxOutId) (utxo TxOutData, err error){
 		return data, nil
 	}
 
-	if data, ok := s.cache.Get(id); ok {
-		return data.(TxOutData), nil
-	}
-
 	// Fetch from storage
 	return s.sto.Get(id)
 }
@@ -144,11 +126,6 @@ func (s *StorageCache) BulkGetTxOut(ids []TxOutId) (outs []TxOutData, err error)
 	for n, id := range ids {
 		if data, ok := s.inserts[id]; ok {
 			outs[n] = data
-			continue
-		}
-
-		if data, ok := s.cache.Get(id); ok {
-			outs[n] = data.(TxOutData)
 			continue
 		}
 
@@ -256,9 +233,18 @@ func (s *StorageCache) GetBalance(address string) (int64, error) {
 // Commit pending insertion, deletions, and height into storage
 func (s *StorageCache) Commit() (err error){
 
-	// Store insertion and deletion maps to slices accepted by BulkUpdate
-	toInsert := make([]primitives.TxOut, 0, len(s.inserts))
+	s.balance = nil // Release memory as soon as possible
+
+	// Convert deletions map into slice
 	toDelete := make([]TxOutId,          0, len(s.deletions))
+	
+	for id, _ := range s.deletions {
+		toDelete = append(toDelete, id)	
+	}
+	s.deletions = nil // Release memory
+
+	// Convert insertions map into slice
+	toInsert := make([]primitives.TxOut, 0, len(s.inserts))
 	
 	for id, data := range s.inserts {
 		hash := id.TxHash
@@ -270,10 +256,7 @@ func (s *StorageCache) Commit() (err error){
 		}
 		toInsert = append(toInsert, utxo)
 	}
-
-	for id, _ := range s.deletions {
-		toDelete = append(toDelete, id)	
-	}
+	s.inserts = nil // Release Memory
 
 	// Update DB
 	err = s.sto.BulkUpdate(toInsert, toDelete, s.height, s.hash)
@@ -281,27 +264,11 @@ func (s *StorageCache) Commit() (err error){
 		return err
 	}
 
-	// Save random utxouts to cache until all the old ones are purged or
-	// there aren't any remaining
-	count := 0
-	for id, data := range s.inserts {
-		s.cache.Set(id, data)
-		count += 1
-		if count > s.cacheSize {
-			break
-		}
-	}
-
-	// Cleanup cached operations and balance after successfull commit
-	s.inserts   = make(map[TxOutId]TxOutData, InitialQueueSize)
-	s.deletions = make(map[TxOutId]bool, InitialQueueSize)
+	// Re allocate cache maps after successfull commit
+	s.inserts   = make(map[TxOutId]TxOutData, InitialQueueSize) // Release memory as soon as possible
+	s.deletions = make(map[TxOutId]bool, InitialQueueSize) // Release memory
 	s.balance   = make(map[string]int64, InitialQueueSize)
 
 	// Clean inserts and deletions
 	return nil
-}
-
-// Resize cache max size.
-func (s *StorageCache) Resize(size int) {
-	s.cache.Resize(size, 10)
 }

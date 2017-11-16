@@ -69,7 +69,7 @@ func cacheUncommittedLen(t *testing.T, cache *StorageCache, size int) {
 func TestCacheLen(t *testing.T) {
 
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _ := NewStorageCache(storage, 10000)
+	cache, _ := NewStorageCache(storage)
 	cache.SetHeight(100)
 	cache.SetHash(primitives.MainNetGenesisHash)
 
@@ -106,7 +106,7 @@ func TestCacheLen(t *testing.T) {
 
 	// Delete some uncommitted TxOuts
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _ = NewStorageCache(storage, 10000)
+	cache, _ = NewStorageCache(storage)
 	cache.SetHeight(100)
 	
 	more   := mockTxOuts(4000, 5000, 1, 0)
@@ -126,7 +126,7 @@ func TestCacheLen(t *testing.T) {
 
 	// Mixed add and delete
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _ = NewStorageCache(storage, 10000)
+	cache, _ = NewStorageCache(storage)
 	cache.SetHeight(100)
 	
 	for _, out := range more {
@@ -149,7 +149,7 @@ func TestCacheLen(t *testing.T) {
 		storage.Set(out)
 	}
 	
-	cache, _ = NewStorageCache(storage, 10000)
+	cache, _ = NewStorageCache(storage)
 	cache.SetHeight(100)
 	
 	cacheLen(t, cache, len(outs))
@@ -167,7 +167,7 @@ func TestCacheGetHashHeight(t *testing.T) {
 		return
 	}
 
-	cache, err := NewStorageCache(storage, 10000)
+	cache, err := NewStorageCache(storage)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -192,7 +192,7 @@ func TestCacheGetHashHeight(t *testing.T) {
 	
 	storage.SetLastBlock(999, primitives.MainNetGenesisHash)
 
-	cache, err = NewStorageCache(storage, 10000)
+	cache, err = NewStorageCache(storage)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -258,7 +258,7 @@ func TestCacheGetHashHeight(t *testing.T) {
 // Test Contains
 func TestCacheContains(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _ := NewStorageCache(storage, 10000)
+	cache, _ := NewStorageCache(storage)
 	cache.SetHeight(100)
 
 	checkContains := func (sto *StorageCache, out primitives.TxOut) {
@@ -325,14 +325,6 @@ func TestCacheContains(t *testing.T) {
 	}
 }
 
-// Test Resize method
-func TestCacheResize(t *testing.T) {
-	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _ := NewStorageCache(storage, 10000)
-
-	cache.Resize(10)
-}
-
 // Test GetTxOut
 func TestCacheGetTxOut(t *testing.T) {	
 
@@ -348,7 +340,7 @@ func TestCacheGetTxOut(t *testing.T) {
 
 
 	// Start cache
-	cache, err := NewStorageCache(storage, 10000)
+	cache, err := NewStorageCache(storage)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -398,7 +390,7 @@ func TestCacheBulkGetTxOut(t *testing.T) {
 
 
 	// Start cache
-	cache, err := NewStorageCache(storage, 10000)
+	cache, err := NewStorageCache(storage)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -463,7 +455,7 @@ func TestCacheBulkGetTxOutDuplicates(t *testing.T) {
 	}
 	initStorage(t, storage, txout1)
 
-	cache, err := NewStorageCache(storage, 10000)
+	cache, err := NewStorageCache(storage)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -492,7 +484,7 @@ func TestCacheBulkGetTxOutDuplicates(t *testing.T) {
 // Test AddTxOut
 func TestCacheAddTxOut(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _   := NewStorageCache(storage, 10000)
+	cache, _   := NewStorageCache(storage)
 	cache.SetHeight(1000)
 	cache.SetHash(primitives.MainNetGenesisHash)
 
@@ -550,7 +542,7 @@ func TestCacheAddTxOut(t *testing.T) {
 // Test DelTxOut
 func TestCacheDelTxOut(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _   := NewStorageCache(storage, 10000)
+	cache, _   := NewStorageCache(storage)
 
 	outs   := mockTxOuts(0, 400, 1, 1)
 	outsId := TxOutToId(outs)
@@ -625,7 +617,7 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check negative value TxOut
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _   := NewStorageCache(storage, 10000)
+	cache, _   := NewStorageCache(storage)
 	cache.SetHeight(1000)
 
 	cache.AddTxOut(*negativeTxOut)
@@ -636,7 +628,7 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check zero value TxOut
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage, 10000)
+	cache, _   = NewStorageCache(storage)
 	cache.SetHeight(1000)
 
 	cache.AddTxOut(*zeroTxOut)
@@ -647,7 +639,7 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check address-less TxOut
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage, 10000)
+	cache, _   = NewStorageCache(storage)
 	cache.SetHeight(1000)
 
 	cache.AddTxOut(*noAddressTxOut)
@@ -658,7 +650,7 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check negative height
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage, 10000)
+	cache, _   = NewStorageCache(storage)
 	cache.SetHeight(-1000)
 
 	cache.AddTxOut(*validTxOut)
@@ -669,7 +661,7 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check there's a rollback on error
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage, 10000)
+	cache, _   = NewStorageCache(storage)
 	cache.SetHeight(1000)
 
 	outs   := mockTxOuts(0, 400, 1, 1)

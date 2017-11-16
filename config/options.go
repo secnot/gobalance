@@ -9,11 +9,12 @@ const (
 	DefaultConfigPath     = "$HOME/.gobalance/"
 	DefaultConfigFilename = "conf"
 
-	// Default values for missing parameters
+	// Bitcoind
 	DefaultBitcoindHost     = "localhost:8332"
 	DefaultBitcoindMainnet  = "mainnet"
 	DefaultBitcoindTestnet3 = "testnet3"
 
+	// API
 	DefaultApiUrlPrefix = "/"
 	DefaultApiPort      = int64(8080)
 	DefaultApiBind      = ""
@@ -96,8 +97,6 @@ var Options = [] Option {
 		typ:  reflect.Int64,
 		def:  DefaultBalanceCacheSize,
 	},
-
-	//
 }
 
 

@@ -45,7 +45,7 @@ type BlockManager struct {
 // NewBlockManager
 func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16) (*BlockManager, error) {
 
-	cache, err := storage.NewStorageCache(sto, cacheSize)
+	cache, err := storage.NewStorageCache(sto)
 	if err != nil {
 		return nil, err
 	}
@@ -184,12 +184,14 @@ func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 	elapsed := now.Sub(b.lastTime).Minutes() // time since last block
 	if b.storageCache.UncommittedLen() > b.commitSize || elapsed > 2.0 {
 		
-		log.Print("Commit: ", b.storageCache.GetHeight(), b.storageCache.UncommittedLen(), b.commitSize)
+		log.Print("Commit: ", b.storageCache.GetHeight())
 		err := b.storageCache.Commit()
 		if err != nil {
 			return nil, err
 		}
-		b.lastTime = time.Now() // In case commit was too slow
+
+		// In case the commit was too slow
+		now = time.Now()
 	}
 	b.lastTime = now
 
