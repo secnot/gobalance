@@ -1,4 +1,4 @@
-package crawler
+package block_manager
 
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/secnot/gobalance/primitives"
-	"github.com/secnot/gobalance/crawler/storage"
+	"github.com/secnot/gobalance/block_manager/storage"
 )
 
 const (
@@ -19,7 +19,6 @@ const (
 )
 
 var ErrBacktrackLimit = errors.New("Backtrack limit reached")
-
 
 type BlockManager struct {
 
@@ -227,4 +226,5 @@ func (b *BlockManager) GetBalance(address string) (int64, error) {
 
 	return pendingBalance + storedBalance, nil
 }
+
 

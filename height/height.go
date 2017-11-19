@@ -2,7 +2,7 @@ package height
 
 import (
 	"sync"
-	"github.com/secnot/gobalance/crawler"
+	"github.com/secnot/gobalance/block_manager"
 )
 
 
@@ -12,15 +12,15 @@ var Lock sync.RWMutex
 
 func HeightRoutine() {	
 
-	updateChan := crawler.Subscribe(10)
+	updateChan := block_manager.Subscribe(10)
 	
 	for update := range updateChan{
 
 		Lock.Lock()
 		switch update.Class {
-		case crawler.OP_NEWBLOCK:
+		case block_manager.OP_NEWBLOCK:
 			Height = update.Block.Height
-		case crawler.OP_BACKTRACK:
+		case block_manager.OP_BACKTRACK:
 			Height = update.Block.Height - 1
 		}
 		Lock.Unlock()

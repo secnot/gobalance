@@ -3,7 +3,7 @@ package balance
 
 import (
 	"github.com/secnot/simplelru"
-	"github.com/secnot/gobalance/crawler"
+	"github.com/secnot/gobalance/block_manager"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -71,8 +71,8 @@ func (b *BalanceCache) GetBalance(address string) int64 {
 		return balance.(int64)
 	}
 
-	// If there was a cache miss retrieve balance from crawler
-	balance := crawler.GetBalance(address)
+	// If there was a cache miss retrieve balance from block_manager
+	balance := block_manager.GetBalance(address)
 
 	b.cache.Set(address, balance)
 	return balance
@@ -82,7 +82,7 @@ func (b *BalanceCache) GetBalance(address string) int64 {
 func BalanceRoutine(cacheSize int) {
 	cache := NewBalanceCache(cacheSize)
 
-	updateChan := crawler.Subscribe(10)
+	updateChan := block_manager.Subscribe(10)
 	
 	for {
 
@@ -90,9 +90,9 @@ func BalanceRoutine(cacheSize int) {
 		case update := <- updateChan:			
 		
 			switch update.Class {
-			case crawler.OP_NEWBLOCK:
+			case block_manager.OP_NEWBLOCK:
 				cache.NewBlock(update.Block)
-			case crawler.OP_BACKTRACK:
+			case block_manager.OP_BACKTRACK:
 				cache.Backtrack(update.Block)
 			}
 

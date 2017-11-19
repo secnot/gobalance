@@ -8,17 +8,16 @@ import (
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	
-	"github.com/secnot/gobalance/primitives"
-	"github.com/secnot/gobalance/crawler/storage"
+	"github.com/secnot/gobalance/primitives/queue"
 )
 
 
 const (
 	// Max Buffered blocks
 	FetcherBlockBufferSize = 50	
-
-	// Balance request channel size
-	BalanceRequestQueueSize = 20
+	
+	// Max number of blocks 
+	BlockQueueSize = 500
 )
 
 // Subscriber updates types
@@ -31,40 +30,24 @@ const (
 
 // Struct used to send chain updates to subscribers
 type BlockUpdate struct {
-	Class UpdateClass
-	Block *primitives.Block
+	Class  UpdateClass
+	Block  *wire.MsgBlock
+	Hash   *chainhash.Hash
+	Height uint64
 }
 
-func NewBlockUpdate(class UpdateClass, block *primitives.Block) BlockUpdate{
+//
+func NewBlockUpdate(class UpdateClass, block *wire.MsgBlock, hash *chainhash.Hash, height uint64) BlockUpdate{
 	return BlockUpdate{
-		Class: class,
-		Block: block,
+		Class:  class,
+		Block:  block,
+		Hash:   hash,
+		Height: height,
 	}
 }
 
 // Channel type used to send subscriber updates
 type UpdateChan chan BlockUpdate
-
-// BalanceRequest is used to send balance requests to the crawler
-// throug BalanceChan channel
-type BalanceRequest struct {
-
-	// Bitcoin address
-	Address string
-	
-	// Channel used to send the response
-	Resp chan BalanceResponse
-}
-
-// Balance request response
-type BalanceResponse struct {
-
-	// Bitcoin address balance or 0 if not found
-	Balance int64
-
-	// Error generated while processing request
-	Err error
-}
 
 // Crawler channels
 var (
@@ -79,19 +62,13 @@ var (
 
 	// Signal crawler to stop fetching and exit.
 	StopChan        = make(chan chan bool)
-
-	// Channel for handling balance requests
-	BalanceChan     = make(chan BalanceRequest, BalanceRequestQueueSize)
 )
 
 type CrawlerData struct {
-	// start/stop flag
-	start bool
-
-	// Used to send stop signal to fetcher routine
+	// Channel to signal fetcher routine to stop
 	fetcherStop chan bool
 
-	// Reception of fetched blocks
+	// Channel for the reception of fetcher blocks
 	fetcherBlocks chan blockRecord
 
 	// Block updates subscribers 
@@ -100,75 +77,51 @@ type CrawlerData struct {
 	// Height for the next block to retrieve
 	height uint64
 
-	// Block handler
-	blockManager *BlockManager
-
 	// Configuration for bitcoind RPC server
 	rpcConfig rpcclient.ConnConfig
 
-	// Hashes for the last unconfirmed blocks
-	blockQueue []chainhash.Hash
+	// Hashes for the last n unconfirmed blocks
+	blockQueue *queue.Queue
 }
 
-// NewCrawler: Allocate new crawler
-func newCrawlerData(config rpcclient.ConnConfig, store storage.Storage, txOutCacheSize int, blockConfirmations uint16) (*CrawlerData, error) {
+// NewCrawler creates a new crawler
+func newCrawlerData(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) (*CrawlerData, error) {
 
-	lastStoredHeight, lastStoredHash, err := store.GetLastBlock()
-	if err != nil {
-		return nil, err
-	}
+	blockQueue := queue.New()
+	blockQueue.PushBack(prevBlockHash)
 
-	manager, err := NewBlockManager(store, txOutCacheSize, blockConfirmations)
-	if err != nil {
-		return nil, err
-	}
-
-	// Start crawling the next block
-	blockQueue := make([]chainhash.Hash, 0, blockConfirmations)
-	blockQueue = append(blockQueue, lastStoredHash)
 
 	return &CrawlerData{
 		fetcherStop:   nil,
 		fetcherBlocks: nil,
 		rpcConfig:     config,
-		height:        uint64(lastStoredHeight+1),
+		height:        startHeight,
 		subscribers:   make(map [UpdateChan]bool),
-		blockManager:  manager,
 		blockQueue:    blockQueue,
 	}, nil
 }
 
-// backtrack discards last block and fetchs it again
-func (c *CrawlerData) backtrackBlock(block *wire.MsgBlock, hash *chainhash.Hash) *primitives.Block{	
+// backtrackBlock backtracks and discards last block and restart fetcher 
+func (c *CrawlerData) backtrackBlock() chainhash.Hash {	
 	// BACKTRACK ONE BLOCK
-	if len(c.blockQueue) == 1 {
-		log.Print(block.Header.PrevBlock)
-		log.Print(c.blockQueue[len(c.blockQueue)-1])
-		log.Panic("Crawler: Backtrack limit reached")
-	}
-	pBlock, err := c.blockManager.BacktrackBlock()
-	if err != nil {
-		log.Panic(err)
+	if c.blockQueue.Len() == 1 {
+		log.Panic("Backtrack limit reached")
 	}
 
 	c.height -= 1
-	c.blockQueue = c.blockQueue[:len(c.blockQueue)-1]
 	c.newFetcher(c.height) // Fetch previous block again
-	return pBlock
+	return c.blockQueue.PopBack().(chainhash.Hash)
 }
 
-// newblock adds a new block
-func (c *CrawlerData) newBlock(block *wire.MsgBlock, hash *chainhash.Hash) *primitives.Block {	
-	// ADD NEW BLOCK
-	pBlock, err := c.blockManager.AddBlock(block, hash)
-	if err != nil {
-		log.Panic(err)
-	}
+// newBlock adds a new block
+func (c *CrawlerData) newBlock(block *wire.MsgBlock, hash *chainhash.Hash) {	
 	c.height += 1
-	c.blockQueue = append(c.blockQueue, *hash)
-	return pBlock
-}
+	c.blockQueue.PushBack(*hash)
 
+	if c.blockQueue.Len() > BlockQueueSize {
+		c.blockQueue.PopFront()
+	}
+}
 
 // processBlock process new blockchain block
 func (c *CrawlerData) processBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) {
@@ -178,19 +131,18 @@ func (c *CrawlerData) processBlock(block *wire.MsgBlock, blockHash *chainhash.Ha
 	if verifiedHash != *blockHash {
 		log.Print("Crawler: Invalid hash ", *blockHash, verifiedHash)
 		c.newFetcher(c.height+1) // Fetch same block again
-		return
 	}
 
-	if block.Header.PrevBlock != c.blockQueue[len(c.blockQueue)-1] {
-		pBlock := c.backtrackBlock(block, &verifiedHash)
+	if block.Header.PrevBlock != c.blockQueue.Back().(chainhash.Hash) {
+		backtrackedBlockHash := c.backtrackBlock()
 
 		// Send backtrack update to subscribers
-		c.notifySubscribers(NewBlockUpdate(OP_BACKTRACK, pBlock))
+		c.notifySubscribers(NewBlockUpdate(OP_BACKTRACK, nil, &backtrackedBlockHash, c.height))
 	} else {
-		pBlock := c.newBlock(block, &verifiedHash)
+		c.newBlock(block, &verifiedHash)
 
 		// Send new block to subscribers
-		c.notifySubscribers(NewBlockUpdate(OP_NEWBLOCK, pBlock))
+		c.notifySubscribers(NewBlockUpdate(OP_NEWBLOCK, block, &verifiedHash, c.height-1))
 	}
 }
 
@@ -229,12 +181,9 @@ func (c *CrawlerData) delSubscriber(subscriber UpdateChan) {
 }
 
 // Crawler routine
-func Crawler(config rpcclient.ConnConfig, store storage.Storage, utxoCacheSize int, blockConfirmations uint16) {
+func Crawler(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) {
 
-	crawler, _ := newCrawlerData(config, store, utxoCacheSize, blockConfirmations)
-
-	// Start logging routine for new blocks and backtracks
-	go Logger()
+	crawler, _ := newCrawlerData(config, startHeight, prevBlockHash)
 
 	// Accept subscriptions and wait until the start signal is received
 	// Fetch blocks until the stop signal is received
@@ -264,11 +213,6 @@ func Crawler(config rpcclient.ConnConfig, store storage.Storage, utxoCacheSize i
 			// New block available
 			case record := <-crawler.fetcherBlocks:
 				crawler.processBlock(record.Block, record.BlockHash)
-
-			// Request balance for one address
-			case req := <-BalanceChan:
-				balance, err := crawler.blockManager.GetBalance(req.Address)
-				req.Resp <- BalanceResponse{Balance: balance, Err: err}
 		}
 	}
 }
@@ -294,7 +238,6 @@ func Start() {
 	<- ch
 }
 
-
 // Stop crawler blocks until successfull exit
 func Stop() {	
 	ch := make(chan bool)
@@ -302,15 +245,4 @@ func Stop() {
 
 	// Wait until it has stopped
 	<- ch
-}
-
-// GetBalance sends a request for the balance of an address and returns the channel
-// where the response will be sent
-func GetBalance(address string) int64 {
-
-	// Channel that will be used by crawler to send the response
-	responseCh := make(chan BalanceResponse)
-	BalanceChan <- BalanceRequest{ Address: address, Resp: responseCh}
-	balance := <- responseCh
-	return balance.Balance
 }

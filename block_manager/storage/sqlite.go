@@ -11,9 +11,9 @@ import (
 
 type utxo struct {
 	TxHash []byte          `db:"tx"`   // Hash for the transaction containing the TxOut
-	Nout   uint32          `db:"nout"` // Output number
-	Addr   string          `db:"addr"` // Bitcoin address from pkScript
 	Value  int64           `db:"value"`// Output ammount
+	Addr   string          `db:"addr"` // Bitcoin address from pkScript
+	Nout   uint32          `db:"nout"` // Output number
 }
 
 var SCHEMAS = [...]string {

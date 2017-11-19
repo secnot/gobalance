@@ -23,12 +23,11 @@ func NewTxOutId(hash *chainhash.Hash, nout uint32) *TxOutId {
 }
 
 type TxOutData struct {
+	// Output value
+	Value   int64
 
 	// Redeem address for the transaction output
 	Addr string
-
-	// Output value
-	Value   int64
 }
 
 func NewTxOutData(address string, value int64) *TxOutData {

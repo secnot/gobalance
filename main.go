@@ -15,7 +15,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 
 	"github.com/secnot/gobalance/crawler"
-	"github.com/secnot/gobalance/crawler/storage"
+	"github.com/secnot/gobalance/block_manager"
+	"github.com/secnot/gobalance/block_manager/storage"
 	"github.com/secnot/gobalance/recent_tx"
 	"github.com/secnot/gobalance/balance"
 	"github.com/secnot/gobalance/height"
@@ -80,9 +81,21 @@ func main() {
 	}
 
 	// Launch Crawler
-	go crawler.Crawler(rpcConf, utxoStorage, 
+	lastHeight, lastBlockHash, err := utxoStorage.GetLastBlock()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	go crawler.Crawler(rpcConf, uint64(lastHeight+1), lastBlockHash)
+
+	// Launch Block Manager
+	updateChan := crawler.Subscribe(10)
+	go block_manager.Manager(
+		utxoStorage, 
 		int(conf["utxo_cache_size"].(int64)), 
-		uint16(conf["recent_blocks"].(int64)))
+		uint16(conf["recent_blocks"].(int64)), 
+		updateChan)
+	
 
 	// Launch balance cache routine
 	go balance.BalanceRoutine(int(conf["balance_cache_size"].(int64)))

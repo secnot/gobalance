@@ -1,7 +1,7 @@
 package recent
 
 import (
-	"github.com/secnot/gobalance/crawler"
+	"github.com/secnot/gobalance/block_manager"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -82,7 +82,7 @@ func RecentTxRoutine(cacheSize uint16) {
 	cache := NewBlockCache(int(cacheSize))
 
 	//
-	updatesChan  := crawler.Subscribe(10)
+	updatesChan  := block_manager.Subscribe(10)
 
 	for {
 
@@ -90,9 +90,9 @@ func RecentTxRoutine(cacheSize uint16) {
 		case update := <- updatesChan:
 			
 			switch update.Class {
-			case crawler.OP_NEWBLOCK:
+			case block_manager.OP_NEWBLOCK:
 				cache.NewBlock(update.Block)
-			case crawler.OP_BACKTRACK:
+			case block_manager.OP_BACKTRACK:
 				cache.Backtrack(update.Block)
 			}
 
