@@ -73,6 +73,9 @@ type Storage interface {
 
 	// Atomic bulk utxo insertion and deletion
 	BulkUpdate(insert []primitives.TxOut, remove []TxOutId, height int64, hash chainhash.Hash) (err error)
+
+	// Same as Bulk update but using same maps as cache
+	BulkUpdateFromMap(insert map[TxOutId]TxOutData, remove map[TxOutId]bool, height int64, hash chainhash.Hash) error
 }
 
 

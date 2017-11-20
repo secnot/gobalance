@@ -388,8 +388,7 @@ func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, 
 
 		// Delete expent utxo
 		for _, rem := range remove {
-			_, err = deleteStmt.Exec(rem.TxHash[:], rem.Nout)
-			if err != nil {
+			if _, err := deleteStmt.Exec(rem.TxHash[:], rem.Nout); err != nil {
 				return err
 			}
 		}
@@ -413,6 +412,43 @@ func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, 
 	})
 
 	return err
+}
+
+// BulkUpdate Atomic bulk storage update, but directly from the maps used by cache
+func (s *SQLiteStorage) BulkUpdateFromMap(insert map[TxOutId]TxOutData, remove map[TxOutId]bool, height int64, hash chainhash.Hash) error {
+
+	if height < 0 {
+		return ErrNegativeHeight
+	}
+
+	return Transact(s.db, func(tx *sqlx.Tx) error {
+		setStmt       := tx.Stmtx(s.setStmt)
+		deleteStmt    := tx.Stmtx(s.deleteStmt)
+		lastBlockStmt := tx.Stmtx(s.setLastBlockStmt)
+
+		// Delete expent utxo
+		for rem, _ := range remove {
+			if _, err := deleteStmt.Exec(rem.TxHash[:], rem.Nout); err != nil {
+				return err
+			}
+		}
+
+		// Insert new utxo
+		for id, data := range insert {
+			if _, err := setStmt.Exec(id.TxHash[:], id.Nout, data.Addr, data.Value); err != nil {
+				if err.Error() == "Negative utxo" {
+					err = ErrNegativeUtxo
+				} else if err.Error() == "Unexpendable utxo" {
+					err = ErrUnexpendableUtxo
+				}
+				return err
+			}
+		}
+
+		// Set lastblock
+		_, err := lastBlockStmt.Exec(height, hash[:])
+		return err
+	})
 }
 
 

@@ -69,7 +69,7 @@ func cacheUncommittedLen(t *testing.T, cache *StorageCache, size int) {
 func TestCacheLen(t *testing.T) {
 
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _ := NewStorageCache(storage)
+	cache, _ := NewStorageCache(storage, true)
 	cache.SetHeight(100)
 	cache.SetHash(primitives.MainNetGenesisHash)
 
@@ -81,7 +81,7 @@ func TestCacheLen(t *testing.T) {
 	outsId := TxOutToId(outs)
 
 	for _, out := range outs {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 	cacheLen(t, cache, 0)
 	cacheUncommittedLen(t, cache, len(outs))
@@ -93,7 +93,7 @@ func TestCacheLen(t *testing.T) {
 
 	// Delete some of the TxOuts
 	for _, out := range outsId[:500] {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 
 	cacheLen(t, cache, len(outs))
@@ -106,34 +106,34 @@ func TestCacheLen(t *testing.T) {
 
 	// Delete some uncommitted TxOuts
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _ = NewStorageCache(storage)
+	cache, _ = NewStorageCache(storage, true)
 	cache.SetHeight(100)
 	
 	more   := mockTxOuts(4000, 5000, 1, 0)
 	moreId := TxOutToId(more)
 	
 	for _, out := range more {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 	cacheLen(t, cache, 0)
 	cacheUncommittedLen(t, cache, len(more))
 
 	for _, out := range moreId[:500] {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 	cacheLen(t, cache, 0)
 	cacheUncommittedLen(t, cache, len(more)-500)
 
 	// Mixed add and delete
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _ = NewStorageCache(storage)
+	cache, _ = NewStorageCache(storage, true)
 	cache.SetHeight(100)
 	
 	for _, out := range more {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 	for _, out := range outsId {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 	cacheLen(t, cache, 0)
 	cacheUncommittedLen(t, cache, len(more)+len(outs))
@@ -149,7 +149,7 @@ func TestCacheLen(t *testing.T) {
 		storage.Set(out)
 	}
 	
-	cache, _ = NewStorageCache(storage)
+	cache, _ = NewStorageCache(storage, true)
 	cache.SetHeight(100)
 	
 	cacheLen(t, cache, len(outs))
@@ -167,7 +167,7 @@ func TestCacheGetHashHeight(t *testing.T) {
 		return
 	}
 
-	cache, err := NewStorageCache(storage)
+	cache, err := NewStorageCache(storage, true)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -192,7 +192,7 @@ func TestCacheGetHashHeight(t *testing.T) {
 	
 	storage.SetLastBlock(999, primitives.MainNetGenesisHash)
 
-	cache, err = NewStorageCache(storage)
+	cache, err = NewStorageCache(storage, true)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -258,7 +258,7 @@ func TestCacheGetHashHeight(t *testing.T) {
 // Test Contains
 func TestCacheContains(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _ := NewStorageCache(storage)
+	cache, _ := NewStorageCache(storage, true)
 	cache.SetHeight(100)
 
 	checkContains := func (sto *StorageCache, out primitives.TxOut) {
@@ -292,7 +292,7 @@ func TestCacheContains(t *testing.T) {
 	outsId := TxOutToId(outs)
 
 	for _, out := range outs {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 	for _, out := range outs {
 		checkContains(cache, out)
@@ -306,7 +306,7 @@ func TestCacheContains(t *testing.T) {
 
 	// Delete some of the TxOuts
 	for _, out := range outsId[:500] {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 	for _, out := range outs[:500] {
 		checkNotContains(cache, out)
@@ -340,7 +340,7 @@ func TestCacheGetTxOut(t *testing.T) {
 
 
 	// Start cache
-	cache, err := NewStorageCache(storage)
+	cache, err := NewStorageCache(storage, true)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -355,7 +355,7 @@ func TestCacheGetTxOut(t *testing.T) {
 	moreOuts := mockTxOuts(200000, 201000, 2, 0)
 
 	for _, out := range moreOuts {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 
 	for _, out := range moreOuts {
@@ -390,11 +390,12 @@ func TestCacheBulkGetTxOut(t *testing.T) {
 
 
 	// Start cache
-	cache, err := NewStorageCache(storage)
+	cache, err := NewStorageCache(storage, true)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
 	}
+	cache.SetHeight(100)
 
 	// Use BulkGetTxOut to check storage initial data
 	for i:=0; i < len(stored); i++ {
@@ -419,13 +420,16 @@ func TestCacheBulkGetTxOut(t *testing.T) {
 	mixedIds  := TxOutToId(mixed)
 	mixedData := TxOutToData(mixed)
 	for _, out := range mixed[:500] {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 	
-	cache.Commit()
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+		return
+	}
 	
 	for _, out := range mixed[500:] {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 
 	returned , err := cache.BulkGetTxOut(mixedIds)
@@ -455,7 +459,7 @@ func TestCacheBulkGetTxOutDuplicates(t *testing.T) {
 	}
 	initStorage(t, storage, txout1)
 
-	cache, err := NewStorageCache(storage)
+	cache, err := NewStorageCache(storage, true)
 	if err != nil {
 		t.Error("NewStorageCache(): ", err)
 		return
@@ -481,17 +485,17 @@ func TestCacheBulkGetTxOutDuplicates(t *testing.T) {
 	}
 }
 
-// Test AddTxOut
-func TestCacheAddTxOut(t *testing.T) {
+// Test addTxOut
+func TestCacheaddTxOut(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _   := NewStorageCache(storage)
+	cache, _   := NewStorageCache(storage, true)
 	cache.SetHeight(1000)
 	cache.SetHash(primitives.MainNetGenesisHash)
 
 	// Add TxOut and check they are available before commit
 	outs   := mockTxOuts(1000, 2000, 2, 0)
 	for _, out := range outs {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 
 	for _, out := range outs {
@@ -507,7 +511,7 @@ func TestCacheAddTxOut(t *testing.T) {
 	// Delete some outputs and check
 	outsId := TxOutToId(outs)
 	for _, del := range outsId[:500] {
-		cache.DelTxOut(del)
+		cache.delTxOut(del)
 	}
 
 	for _, del := range outs[:500] {
@@ -539,21 +543,21 @@ func TestCacheAddTxOut(t *testing.T) {
 	}
 }
 
-// Test DelTxOut
-func TestCacheDelTxOut(t *testing.T) {
+// Test delTxOut
+func TestCachedelTxOut(t *testing.T) {
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _   := NewStorageCache(storage)
+	cache, _   := NewStorageCache(storage, true)
 
 	outs   := mockTxOuts(0, 400, 1, 1)
 	outsId := TxOutToId(outs)
 
 	for _, out := range outs {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
 
 	// Remove half of the inserted txouts
 	for _, out := range outsId[:100] {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 
 	for _, out := range outs[:100] {
@@ -572,7 +576,7 @@ func TestCacheDelTxOut(t *testing.T) {
 	}
 
 	for _, out := range outsId[100:200] {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 
 	for _, out := range outs[:200] {
@@ -589,7 +593,7 @@ func TestCacheDelTxOut(t *testing.T) {
 
 	// Remove non existent txout
 	for _, out := range outsId[:100] {
-		cache.DelTxOut(out)
+		cache.delTxOut(out)
 	}
 
 	if err := cache.Commit(); err != nil {
@@ -617,10 +621,10 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check negative value TxOut
 	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _   := NewStorageCache(storage)
+	cache, _   := NewStorageCache(storage, true)
 	cache.SetHeight(1000)
 
-	cache.AddTxOut(*negativeTxOut)
+	cache.addTxOut(*negativeTxOut)
 	if err := cache.Commit(); err != ErrNegativeUtxo {
 		t.Error(err)
 		return
@@ -628,10 +632,10 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check zero value TxOut
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage)
+	cache, _   = NewStorageCache(storage, true)
 	cache.SetHeight(1000)
 
-	cache.AddTxOut(*zeroTxOut)
+	cache.addTxOut(*zeroTxOut)
 	if err := cache.Commit(); err != ErrUnexpendableUtxo {
 		t.Error(err)
 		return
@@ -639,10 +643,10 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check address-less TxOut
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage)
+	cache, _   = NewStorageCache(storage, true)
 	cache.SetHeight(1000)
 
-	cache.AddTxOut(*noAddressTxOut)
+	cache.addTxOut(*noAddressTxOut)
 	if err := cache.Commit(); err != ErrUnexpendableUtxo {
 		t.Error(err)
 		return
@@ -650,10 +654,10 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check negative height
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage)
+	cache, _   = NewStorageCache(storage, true)
 	cache.SetHeight(-1000)
 
-	cache.AddTxOut(*validTxOut)
+	cache.addTxOut(*validTxOut)
 	if err := cache.Commit(); err != ErrNegativeHeight {
 		t.Error(err)
 		return
@@ -661,14 +665,14 @@ func TestCacheCommitErrors(t *testing.T) {
 
 	// Check there's a rollback on error
 	storage, _ = NewSQLiteStorage(":memory:")
-	cache, _   = NewStorageCache(storage)
+	cache, _   = NewStorageCache(storage, true)
 	cache.SetHeight(1000)
 
 	outs   := mockTxOuts(0, 400, 1, 1)
 	for _, out := range outs {
-		cache.AddTxOut(out)
+		cache.addTxOut(out)
 	}
-	cache.AddTxOut(*negativeTxOut)
+	cache.addTxOut(*negativeTxOut)
 
 	if err := cache.Commit(); err != ErrNegativeUtxo {
 		t.Error(err)
@@ -685,5 +689,60 @@ func TestCacheCommitErrors(t *testing.T) {
 	if err != nil || height != -1 || hash != primitives.ZeroHash {
 		t.Error("New height was written storage with a failed commit")
 		return
+	}
+}
+
+// Test Balance index can be disabled
+func TestCacheAddressIndex(t *testing.T) {
+	
+	// Create a test block with a single output
+	hash := mockHash(23123)
+	balanceTxOut := primitives.NewTxOut(&hash, 1, "an_address", 1000)
+	
+	balanceTx    := primitives.NewTx(&hash)
+	balanceTx.AddOut(balanceTxOut)
+
+	balanceBlock := primitives.NewBlock(hash, primitives.MainNetGenesisHash, 1001)
+	balanceBlock.AddTx(balanceTx)	
+
+	// Cache with balance indexing enabled
+	storage, _ := NewSQLiteStorage(":memory:")
+	cache, _   := NewStorageCache(storage, true)
+	cache.SetHeight(1000)
+
+	cache.AddBlock(balanceBlock)
+	if balance, err := cache.GetBalance("an_address"); balance != 1000 || err != nil {
+		t.Error("Balance index was not enabled")
+		return
+	}
+	
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+		return
+	}
+
+	if balance, err := cache.GetBalance("an_address"); balance != 1000 || err != nil {
+		t.Error("Balance index was not enabled")
+		return
+	}
+
+	// Cache with balance indexing disabled	
+	storage, _ = NewSQLiteStorage(":memory:")
+	cache, _   = NewStorageCache(storage, false)
+	cache.SetHeight(1000)
+
+	cache.AddBlock(balanceBlock)
+	if balance, err := cache.GetBalance("an_address"); balance != 0 || err != nil {
+		t.Error("Balance index was not enabled")
+		return
+	}
+
+	if err := cache.Commit(); err != nil {
+		t.Error(err)
+		return
+	}
+
+	if balance, err := cache.GetBalance("an_address"); balance != 1000 || err != nil {
+		t.Error("Balance index was not enabled")
 	}
 }

@@ -44,7 +44,7 @@ type BlockManager struct {
 // NewBlockManager
 func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16) (*BlockManager, error) {
 
-	cache, err := storage.NewStorageCache(sto)
+	cache, err := storage.NewStorageCache(sto, true)
 	if err != nil {
 		return nil, err
 	}

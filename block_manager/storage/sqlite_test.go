@@ -521,6 +521,55 @@ func TestSQLiteBulkUpdate(t *testing.T) {
 	}
 }
 
+// Test BulkUpdateFromMap method
+func TestSQLiteBulkUpdateMap(t *testing.T) {
+	storage, err := NewSQLiteStorage(":memory:")
+	if err != nil {
+		t.Error("Error initializing DB")
+		return
+	}
+	
+	storedOuts := mockTxOuts(10000, 100000, 2, 0)
+	initStorage(t, storage, storedOuts)
+	storageLastBlockIs(t, storage, int64(-1), primitives.ZeroHash)
+	storageLengthIs(t, storage, 180000)
+
+	//
+	removeOuts := mockTxOuts(10000, 20000, 2, 0)
+	insertOuts := mockTxOuts(200000, 207500, 2, 0)
+
+	removeIds := TxOutToId(removeOuts)
+
+	// Convert slices to maps
+	insertMap := make(map[TxOutId]TxOutData, InitialQueueSize) // Release memory as soon as possible
+	removeMap := make(map[TxOutId]bool, InitialQueueSize) // Release memory
+	
+	for _, out := range removeOuts {
+		id := TxOutId{TxHash: *out.TxHash, Nout: out.Nout}
+		removeMap[id] = true
+	}
+
+	for _, out := range insertOuts {
+		id := TxOutId{TxHash: *out.TxHash, Nout: out.Nout}
+		insertMap[id] = TxOutData{Addr: out.Addr, Value: out.Value}
+	}
+
+	// 
+	storage.BulkUpdateFromMap(insertMap, removeMap, int64(10000), primitives.MainNetGenesisHash)
+	storageLastBlockIs(t, storage, int64(10000), primitives.MainNetGenesisHash)
+	storageLengthIs(t, storage, 175000)
+	
+	// Compare inserted records
+	for _, ins := range insertOuts {
+		storageContains(t, storage, ins)
+	}
+
+	// Check deleted records
+	for _, rem := range removeIds {
+		storageNotContains(t, storage, rem)
+	}
+}
+
 // Test BulkUpdate return errors for invalid operations
 func TestSQLiteBulkUpdateErrors(t *testing.T) {	
 	
