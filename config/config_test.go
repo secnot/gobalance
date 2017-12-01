@@ -44,6 +44,10 @@ func TestValidConfigFile(t *testing.T) {
 	if data["workdir"].(string) != "thatdir" {
 		t.Errorf("workdir: Unexpected value")
 	}
+
+	if data["sync"].(bool) != true {
+		t.Errorf("sync: Unexpected value")
+	}
 	
 	// Test api option values
 	if data["api.url_prefix"].(string) != "/api/v1/" {
@@ -96,6 +100,10 @@ func TestDefaultValuesConfigFile(t *testing.T) {
 
 	if data["workdir"].(string) != DefaultConfigPath {
 		t.Errorf("workdir: Unexpected default value")
+	}
+	
+	if data["sync"].(bool) != false {
+		t.Errorf("sync: Unexpected default value")
 	}
 	
 	// Test api option values

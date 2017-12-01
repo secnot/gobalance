@@ -1,3 +1,6 @@
+# Enable or disable default mode
+sync = true
+
 # Directory where configuration files and utxo DB are stored (default .gobalance)
 workdir = "thatdir"
 

@@ -23,6 +23,7 @@ const (
 	DefaultRecentBlocks     = int64(20)
 	DefaultBalanceCacheSize = int64(100000)
 	DefaultUtxoCacheSize    = int64(200000)
+	DefaultSync				= false
 )
 
 
@@ -96,6 +97,11 @@ var Options = [] Option {
 	{	name: "balance_cache_size",
 		typ:  reflect.Int64,
 		def:  DefaultBalanceCacheSize,
+	},
+
+	{	name: "sync",
+		typ:  reflect.Bool,
+		def:  DefaultSync,
 	},
 }
 
