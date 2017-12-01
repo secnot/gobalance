@@ -52,6 +52,9 @@ type Storage interface {
 	
 	// Get Utxo address and balance, or "", 0 if not stored
 	Get(out TxOutId) (data TxOutData, err error)
+	
+	// Store new utxo
+	Set(out primitives.TxOut) (err error)
 
 	// Get all address utxout
 	GetByAddress(address string) (outs []primitives.TxOut, err error)
@@ -59,9 +62,6 @@ type Storage interface {
 	// Get address accumulated balance 
 	GetBalance(address string) (balance int64, err error)
 	
-	// Store new utxo
-	Set(out primitives.TxOut) (err error)
-
 	// Remove utxo from storage, if it doesn't exist no error is returned.
 	Delete(out TxOutId) (err error)
 
@@ -76,11 +76,22 @@ type Storage interface {
 
 	// Same as Bulk update but using same maps as cache
 	BulkUpdateFromMap(insert map[TxOutId]TxOutData, remove map[TxOutId]bool, height int64, hash chainhash.Hash) error
+
+	// Close storage
+	Close() error
+
+	// CleanUp wasted space, defrag, vacuum, .... in general recover wasted space if applicable
+	CleanUp() error
+
+	// Mark database as dirty, once a databse is marked dirty the only allowed operation is to close it
+	// all the other will return ErrDirtyStorage error.
+	MarkDirty(reason string) error
 }
 
 
 var (
-	ErrNegativeUtxo = errors.New("Storage: utxo has negative value")
+	ErrNegativeUtxo     = errors.New("Storage: utxo has negative value")
 	ErrUnexpendableUtxo = errors.New("Storage: unexpendable utxo")
-	ErrNegativeHeight = errors.New("Storage: Negative height")
+	ErrNegativeHeight   = errors.New("Storage: Negative height")
+	ErrDirtyStorage     = errors.New("Storage: Dirty storage")
 )
