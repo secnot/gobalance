@@ -7,9 +7,8 @@ import (
 	"errors"
 
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/blockchain"
 	"github.com/secnot/gobalance/primitives"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/secnot/gobalance/block_manager/storage"
 )
 
@@ -39,12 +38,16 @@ type BlockManager struct {
 
 	// Blocks waiting for enough confirmations before committing to storage
 	pendingBlocks *primitives.BlockQueue
+
+	// Sync mode flag, when in sync mode the balance is disabled to save memory
+	// and for a faster syncing
+	sync bool
 }
 
 // NewBlockManager
-func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16) (*BlockManager, error) {
+func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16, sync bool) (*BlockManager, error) {
 
-	cache, err := storage.NewStorageCache(sto, true)
+	cache, err := storage.NewStorageCache(sto, !sync)
 	if err != nil {
 		return nil, err
 	}
@@ -56,12 +59,81 @@ func NewBlockManager(sto storage.Storage, cacheSize int, confirmations uint16) (
 		commitSize:     cacheSize,
 		confirmations:	confirmations,
 		pendingBlocks:	primitives.NewBlockQueue(),
+		sync:           sync,
 	}
 
 	return &manager, nil
 }
 
-// buildTx returns a primitives.Tx for the MsgTx (excluding the inputs)
+// getBlockIntpus populates transactions inputs address and value
+func (b *BlockManager) getBlockInputs(block *primitives.Block) (*primitives.Block, error) {	
+	
+	// map all the block transactions
+	blockTxIdx := make(map[chainhash.Hash]*primitives.Tx, len(block.Transactions))
+	for _, tx := range block.Transactions {
+		blockTxIdx[*tx.Hash] = tx
+	}
+	
+	// Find all the missing transaction inputs to retrieve them in a single bulk 
+	// operartion
+	missingIns := make([]storage.TxOutId, 0, AverageBlockInputs)
+	
+	for _, tx := range block.Transactions {
+
+		if tx.IsCoinBase() {
+			continue
+		}
+
+		// Add to missing inputs all the ones not queued or from the current block
+		for _, txIn := range tx.In {
+
+			txInBlock := blockTxIdx[*txIn.TxHash]
+			txInQueue, _ := b.pendingBlocks.Tx(*txIn.TxHash)
+
+			if txInBlock == nil && txInQueue == nil {
+				missingIns = append(missingIns, storage.TxOutId{
+					TxHash: *txIn.TxHash, Nout: txIn.Nout,})
+			}
+		}
+	}
+
+	// Get missing transaction outputs from storage
+	missingData, err := b.storageCache.BulkGetTxOut(missingIns)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add data to transactions inputs
+	var missingIdx int = 0 // Index for the next unused missing input
+
+	for _, tx := range block.Transactions {
+	
+		if tx.IsCoinBase() {
+			continue
+		}
+
+		for _, txIn := range tx.In {
+			if tx, _ := b.pendingBlocks.Tx(*txIn.TxHash); tx != nil {
+				// The input is an output from a pending block
+				txIn.Addr  = tx.Out[txIn.Nout].Addr
+				txIn.Value = tx.Out[txIn.Nout].Value
+			} else if tx := blockTxIdx[*txIn.TxHash]; tx != nil {
+				// The input is an output from the current block
+				txIn.Addr  = tx.Out[txIn.Nout].Addr
+				txIn.Value = tx.Out[txIn.Nout].Value
+			} else {
+				// The input was retrieved from storage
+				txIn.Addr  = missingData[missingIdx].Addr
+				txIn.Value = missingData[missingIdx].Value
+				missingIdx += 1
+			}
+		}
+	}	
+
+	return block, nil
+}
+
+// buildTx returns a primitives.Tx for the MsgTx (without inputs addresses and values)
 func (b *BlockManager) buildTx(wireTx *wire.MsgTx) *primitives.Tx {
 	hash := wireTx.TxHash()
 	tx := primitives.NewTx(&hash)
@@ -74,88 +146,36 @@ func (b *BlockManager) buildTx(wireTx *wire.MsgTx) *primitives.Tx {
 		}
 	}
 
+	for _, txIn := range wireTx.TxIn {
+		prevOutHash := txIn.PreviousOutPoint.Hash
+		txin := primitives.NewTxOut(&prevOutHash, uint32(txIn.PreviousOutPoint.Index), "", 0)
+		if txin != nil {
+			tx.AddIn(txin)
+		}
+	}
+
 	return tx
 }
 
-// buildBlock constructs a primitive.Block from wire.MsgBlock.
 func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, height uint64) (*primitives.Block, error) {
-		
-	// Block construction is a little convoluted to optimize storage IO by 
-	// loading all the missing transactions inputs using a single BulkGet operation.
 	
 	// Build all the block transactions (without inputs)
 	transactions := make([]*primitives.Tx, 0, len(block.Transactions))
-	blockTxIdx := make(map[chainhash.Hash]*primitives.Tx, len(block.Transactions))
 	for _, wireTx := range block.Transactions {
 		tx := b.buildTx(wireTx)
 		transactions = append(transactions, tx)
-		blockTxIdx[*tx.Hash] = tx
 	}
-	
-	// Find all the transaction inputs that need to be retrieved from storage
-	missingIns := make([]storage.TxOutId, 0, AverageBlockInputs)
-	
-	for _, wireTx := range block.Transactions {
-		if blockchain.IsCoinBaseTx(wireTx) {
-			continue
-		}
-
-		for _, txIn := range wireTx.TxIn {
-
-			txInBlock := blockTxIdx[txIn.PreviousOutPoint.Hash]
-			txInQueue, _ := b.pendingBlocks.Tx(txIn.PreviousOutPoint.Hash)
-
-			if txInBlock == nil && txInQueue == nil {
-				// Transaction not in current block or cached.
-				missingIns = append(missingIns, storage.TxOutId{
-					TxHash: txIn.PreviousOutPoint.Hash, 
-					Nout:   txIn.PreviousOutPoint.Index,})
-			}
-		}
-	}
-
-	// Load missing transaction outputs from storage
-	missingData, err := b.storageCache.BulkGetTxOut(missingIns)
-	if err != nil {
-		return nil, err
-	}
-
-	// Add missing inputs to transactions
-	var missingIdx int = 0 // Index for the next unused missing input
-	var output *primitives.TxOut
-
-	for TxIdx := 0; TxIdx < len(block.Transactions); TxIdx += 1 {
-	
-		// If it is coinbase transaction it has only one input
-		if blockchain.IsCoinBaseTx(block.Transactions[TxIdx]) {
-			continue
-		}
-
-		for _, wireTxIn := range block.Transactions[TxIdx].TxIn {
-
-			if tx, _ := b.pendingBlocks.Tx(wireTxIn.PreviousOutPoint.Hash); tx != nil {
-				// The input is an output from a pending block
-				output = tx.Out[wireTxIn.PreviousOutPoint.Index]
-			} else if tx := blockTxIdx[wireTxIn.PreviousOutPoint.Hash]; tx != nil {
-				// The input is an output from the current block
-				output = tx.Out[wireTxIn.PreviousOutPoint.Index]
-			} else {
-				// The input was retrieved from storage
-				output = primitives.NewTxOut(
-					&wireTxIn.PreviousOutPoint.Hash, 
-					wireTxIn.PreviousOutPoint.Index,
-					missingData[missingIdx].Addr,
-					missingData[missingIdx].Value)
-				missingIdx += 1
-			}
-			transactions[TxIdx].AddIn(output)
-		}
-	}	
-
 
 	pBlock := primitives.NewBlock(*bHash, block.Header.PrevBlock, height)
 	pBlock.Transactions = transactions
+
 	return pBlock, nil
+}
+
+// TimeSinceLastBlock returns the seconds elapsed since the last block was processed
+func (b *BlockManager) TimeSinceLastBlock() float64 {
+	now := time.Now()
+	return now.Sub(b.lastTime).Seconds() // time since last block
 }
 
 // AddBlock adds a wire.Block to the manager returning primitives.Block equivalent
@@ -166,7 +186,14 @@ func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 	if err != nil {
 		return nil, err
 	}
-	
+
+	if !b.sync {
+		pBlock, err = b.getBlockInputs(pBlock)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	b.pendingBlocks.PushBack(pBlock)
 
 	// Update current height
@@ -179,20 +206,15 @@ func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 	}
 
 	// Commit cache when there are enough changes
-	now := time.Now()
-	elapsed := now.Sub(b.lastTime).Minutes() // time since last block
-	if b.storageCache.UncommittedLen() > b.commitSize || elapsed > 2.0 {
+	if b.storageCache.UncommittedLen() > b.commitSize || b.TimeSinceLastBlock() > 120.0 {
 		
 		log.Print("Commit: ", b.storageCache.GetHeight())
 		err := b.storageCache.Commit()
 		if err != nil {
 			return nil, err
 		}
-
-		// In case the commit was too slow
-		now = time.Now()
 	}
-	b.lastTime = now
+	b.lastTime = time.Now()
 
 	return pBlock, nil
 }
@@ -227,4 +249,7 @@ func (b *BlockManager) GetBalance(address string) (int64, error) {
 	return pendingBalance + storedBalance, nil
 }
 
-
+// Synced returns true when the manager is with the last blockchain block
+func (b *BlockManager) Synced() bool {
+	return b.TimeSinceLastBlock() > 30.0
+}

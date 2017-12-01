@@ -59,7 +59,7 @@ type BalanceResponse struct {
 	Err error
 }
 
-// Crawler channels
+// manager channels
 var (
 	// New subscription channel
 	SubscribeChan   = make(chan UpdateChan)
@@ -73,8 +73,11 @@ var (
 	// Signal crawler to stop fetching and exit.
 	StopChan        = make(chan chan bool)
 
-	// Channel for handling balance requests
+	// Balance request channel
 	BalanceChan     = make(chan BalanceRequest, BalanceRequestQueueSize)
+
+	// Sync status request channel
+	SyncChan        = make(chan chan bool)
 )
 
 // processUpdate handles raw block updates from crawler
@@ -96,9 +99,9 @@ func processUpdate(update crawler.BlockUpdate, manager *BlockManager) (BlockUpda
 }
 
 // Block Manager routine
-func Manager(sto storage.Storage, commitSize int, confirmations uint16, blockUpdateChan crawler.UpdateChan) {
+func Manager(sto storage.Storage, commitSize int, confirmations uint16, blockUpdateChan crawler.UpdateChan, sync bool) {
 
-	manager, _ := NewBlockManager(sto, commitSize, confirmations)
+	manager, _ := NewBlockManager(sto, commitSize, confirmations, sync)
 
 	// Block updates subscribers 
 	var subscribers = make(map[UpdateChan]bool)
@@ -120,7 +123,6 @@ func Manager(sto storage.Storage, commitSize int, confirmations uint16, blockUpd
 
 			// Stop crawler and exit
 			case ch := <-StopChan:
-				// TODO: Force commit to db, close fetcher, close channels, etc...
 				ch <- true	// signal stopped
 				break
 
@@ -141,6 +143,9 @@ func Manager(sto storage.Storage, commitSize int, confirmations uint16, blockUpd
 			case req := <-BalanceChan:
 				balance, err := manager.GetBalance(req.Address)
 				req.Resp <- BalanceResponse{Balance: balance, Err: err}
+
+			case ch := <-SyncChan:
+				ch <- manager.Synced()
 		}
 	}
 }
@@ -186,4 +191,12 @@ func GetBalance(address string) int64 {
 	BalanceChan <- BalanceRequest{ Address: address, Resp: responseCh}
 	balance := <- responseCh
 	return balance.Balance
+}
+
+// Wait until the manager is synced
+func Synced() bool {
+	responseChan := make(chan bool)
+	SyncChan <- responseChan
+
+	return <- responseChan
 }
