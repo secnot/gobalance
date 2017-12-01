@@ -8,6 +8,7 @@ import (
 	"log"
 	"fmt"
 	"os"
+	"time"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -29,11 +30,29 @@ const (
 	DbFilename = "utxo.db"
 )
 
+var utxoStorage storage.Storage 
 
-// TODO: Catch ctrl-c and exit gracefully
+// CleanUp gracefully stop all routines
+func CleanUp(vacuum bool) {		
+	crawler.Stop()
+	block_manager.Stop()
+
+	if utxoStorage != nil {
+		if vacuum {
+			log.Print("Cleaning Up")
+			if err := utxoStorage.CleanUp(); err != nil {
+				log.Print(err)
+			}
+		}
+		utxoStorage.Close()
+	}
+}
+
+
+// Catch ctrl-c and exit gracefully
 func ExitHandler(c chan os.Signal) {
 	for sig := range c {
-		crawler.Stop()
+		CleanUp(false)
 		log.Print("Exit: ", sig)
 		os.Exit(1)
 	}
@@ -75,7 +94,7 @@ func main() {
 		log.Panic(err)
 	}
 	
-	utxoStorage, err := storage.NewSQLiteStorage(absDbPath)
+	utxoStorage, err = storage.NewSQLiteStorage(absDbPath)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -90,31 +109,52 @@ func main() {
 
 	// Launch Block Manager
 	updateChan := crawler.Subscribe(10)
+	
 	go block_manager.Manager(
 		utxoStorage, 
 		int(conf["utxo_cache_size"].(int64)), 
 		uint16(conf["recent_blocks"].(int64)), 
-		updateChan)
+		updateChan,
+		conf["sync"].(bool), // Enable sync mode
+	)
 	
 
-	// Launch balance cache routine
-	go balance.BalanceRoutine(int(conf["balance_cache_size"].(int64)))
+	if !conf["sync"].(bool) {
+		// Launch balance cache routine
+		go balance.BalanceRoutine(int(conf["balance_cache_size"].(int64)))
 
-	// Launch recent transactions routine
-	go recent.RecentTxRoutine(uint16(conf["recent_blocks"].(int64)))
+		// Launch recent transactions routine
+		go recent.RecentTxRoutine(uint16(conf["recent_blocks"].(int64)))
 
-	// Launch height routine
-	go height.HeightRoutine()
+		// Launch height routine
+		go height.HeightRoutine()
+	}
 
 	// Catch interrupts to exit gracefully
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go ExitHandler(c)
 
-	log.Print("Launched")
+	log.Print("Started")
 
 	// Start crawler
 	crawler.Start()
+
+	// Wait until the blockchain is synced
+	for {
+		time.Sleep(time.Second*10)
+		if block_manager.Synced() {
+			break
+		}
+	}
+	log.Print("Synced")
+
+	// When in sync mode vacuum DB and exit
+	if conf["sync"].(bool) {
+		CleanUp(true)
+		log.Print("Done")
+		os.Exit(1)
+	}
 
 	// Launch JSON API
 	bind := fmt.Sprint("%v:%v", conf["api.bind"].(string), conf["api.port"].(int64))
