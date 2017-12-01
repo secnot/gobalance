@@ -8,6 +8,11 @@ import (
 	"github.com/secnot/gobalance/primitives"
 )
 
+const (
+	// True and false values for sqlite
+	True  = 1
+	False = 0
+)
 
 type utxo struct {
 	TxHash []byte          `db:"tx"`   // Hash for the transaction containing the TxOut
@@ -26,6 +31,10 @@ var SCHEMAS = [...]string {
 			 height integer NOT NULL,
 			 hash BLOB NOT NULL,
 			 PRIMARY KEY(pk))`,
+	`dirty (pk integer NOT NULL,
+			marked integer NOT NULL,
+			message text NOT NULL,
+			PRIMARY KEY(pk))`,
 }
 
 var PRAGMAS = [...]string {	
@@ -64,7 +73,7 @@ func initDB(driverName string, dataSource string) (db *sqlx.DB, err error){
 	// The same as the built-in database/sql
 	db, err = sqlx.Open(driverName, dataSource)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	// Create tables
@@ -108,6 +117,10 @@ type SQLiteStorage struct {
 	//
 	db *sqlx.DB
 
+	// Storage was marked dirty
+	dirty bool
+	dirtyMsg string
+
 	// Stored statements initialized when the db is openned
 	lenStmt *sqlx.Stmt
 	getStmt *sqlx.Stmt
@@ -127,6 +140,10 @@ type SQLiteStorage struct {
 	// Height related statements
 	setLastBlockStmt *sqlx.Stmt
 	getLastBlockStmt *sqlx.Stmt
+
+	// Dirty mark statements
+	getDirtyStmt *sqlx.Stmt
+	setDirtyStmt *sqlx.Stmt
 }
 
 
@@ -134,8 +151,6 @@ type SQLiteStorage struct {
 // NewSQLiteStorage creates and initializes a new storage
 func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 
-	//TODO: Close DB if there is any error
-	//
 	db, err := initDB("sqlite3", DBPath)
 	if err != nil {
 		return nil, err
@@ -146,6 +161,8 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 
 	store := &SQLiteStorage {
 		db: db,
+		dirty: false,
+		dirtyMsg: "", 
 	}
 	
 	// Create prepared statements
@@ -194,12 +211,34 @@ func NewSQLiteStorage(DBPath string) (*SQLiteStorage, error) {
 		return nil, err
 	}
 
+	store.setDirtyStmt, err = db.Preparex("INSERT OR REPLACE INTO dirty(pk, marked, message) VALUES(1, 1, ?);")
+	if err != nil {
+		return nil, err
+	}
+
+	store.getDirtyStmt, err = db.Preparex("SELECT marked, message FROM dirty WHERE pk=1;")
+	if err != nil {
+		return nil, err
+	}
+
+	// Before returning check database isn't dirty
+	if dirty, _, err := store.getDirty(); err != nil || dirty {
+		if dirty {
+			err = ErrDirtyStorage
+		}
+		return nil, err
+	}
+
 	return store, nil
 }
 
 
 // Set address balance if the address exists it's modified, otherwise it's inserted
 func (s *SQLiteStorage) Len() (length int, err error) {
+	if s.dirty {
+		return -1, ErrDirtyStorage
+	}
+
 	err = s.lenStmt.QueryRowx().Scan(&length)
 	return
 }
@@ -207,6 +246,9 @@ func (s *SQLiteStorage) Len() (length int, err error) {
 // GetLastBlock returns the height and hash for the last block committed
 func (s *SQLiteStorage) GetLastBlock() (height int64, hash chainhash.Hash, err error) {
 	var bHash []byte
+	if s.dirty {
+		return -1, primitives.ZeroHash, ErrDirtyStorage
+	}
 
 	err = s.getLastBlockStmt.QueryRowx().Scan(&height, &bHash)	
 	switch { 
@@ -224,6 +266,9 @@ func (s *SQLiteStorage) GetLastBlock() (height int64, hash chainhash.Hash, err e
 
 // SetLastBlock sets new last block deleting previous one
 func (s *SQLiteStorage) SetLastBlock(height int64, hash chainhash.Hash) (err error) {
+	if s.dirty {
+		return ErrDirtyStorage
+	}
 	if height <0 {
 		return ErrNegativeHeight
 	}
@@ -234,6 +279,9 @@ func (s *SQLiteStorage) SetLastBlock(height int64, hash chainhash.Hash) (err err
 
 // Set stores a new utxo record
 func (s *SQLiteStorage) Set(out primitives.TxOut) (err error) {
+	if s.dirty {
+		return ErrDirtyStorage
+	}
 	_, err = s.setStmt.Exec(out.TxHash[:], out.Nout, out.Addr, out.Value)
 	if err == nil {
 		return
@@ -250,6 +298,10 @@ func (s *SQLiteStorage) Set(out primitives.TxOut) (err error) {
 
 // Get return TxOutData
 func (s *SQLiteStorage) Get(out TxOutId) (data TxOutData, err error) {
+	if s.dirty {
+		return TxOutData{}, ErrDirtyStorage
+	}
+
 	err = s.getStmt.QueryRowx(out.TxHash[:], out.Nout).StructScan(&data)
 	switch {
 	// If not present return default value
@@ -263,6 +315,11 @@ func (s *SQLiteStorage) Get(out TxOutId) (data TxOutData, err error) {
 // GetByAddress returns wallet's unexpent txouts
 func (s *SQLiteStorage) GetByAddress(address string) (outs []primitives.TxOut, err error) {
 	var utxos []utxo
+	
+	if s.dirty {
+		return nil, ErrDirtyStorage
+	}
+	
 	err = s.getByAddressStmt.Select(&utxos, address)
 	if err != nil {
 		return nil, err
@@ -285,6 +342,11 @@ func (s *SQLiteStorage) GetByAddress(address string) (outs []primitives.TxOut, e
 
 // GetBalance returns address balance
 func (s *SQLiteStorage) GetBalance(address string) (balance int64, err error) {
+	
+	if s.dirty {
+		return -1, ErrDirtyStorage
+	}
+	
 	err = s.getBalanceStmt.QueryRow(address).Scan(&balance)
 	if err != nil {
 		return -1, err
@@ -297,9 +359,36 @@ func (s *SQLiteStorage) GetBalance(address string) (balance int64, err error) {
 	return balance, err
 }
 
+// getDirty returns the state of the db dirty flag
+func (s *SQLiteStorage) getDirty() (isDirty bool, message string, err error) {
+	var marked int
+
+	err = s.getDirtyStmt.QueryRowx().Scan(&marked, &message)	
+	
+	switch { 
+	case err == sql.ErrNoRows:
+		return false, "", nil
+
+	case err != nil:
+		return false, "", err
+
+	default:
+		if marked == True {
+			return true, message, nil
+		}
+	}
+
+	return false, "", nil
+}
+
 // Contains returns true if the db contains the address
 func (s *SQLiteStorage) Contains(out TxOutId) (bool, error) {
 	var value int64
+
+	if s.dirty {
+		return false, ErrDirtyStorage
+	}
+	
 	err := s.containsStmt.QueryRow(out.TxHash[:], out.Nout).Scan(&value)
 
 	switch { 
@@ -315,8 +404,20 @@ func (s *SQLiteStorage) Contains(out TxOutId) (bool, error) {
 
 }
 
-// Remove Utxo from storage
+// MarkDirty
+func (s *SQLiteStorage) MarkDirty(message string) (err error) {
+	_, err = s.setDirtyStmt.Exec(message)
+	s.dirty    = true
+	s.dirtyMsg = message
+	return
+}
+
+// Delete removes Utxo from storage
 func (s *SQLiteStorage) Delete(out TxOutId) (err error) {
+	if s.dirty {
+		return ErrDirtyStorage
+	}
+
 	_, err = s.deleteStmt.Exec(out.TxHash, out.Nout)
 	return
 }
@@ -344,6 +445,10 @@ func Transact(db *sqlx.DB, txFunc func(*sqlx.Tx) error) (err error) {
 
 // BulkGet utxo get WITHOUT DEFAULT
 func (s *SQLiteStorage) BulkGet(outs []TxOutId) (data []TxOutData, err error) {
+	if s.dirty {
+		return nil, ErrDirtyStorage
+	}
+
 	if len(outs) == 0 {
 		return nil, nil
 	}
@@ -377,6 +482,10 @@ func (s *SQLiteStorage) BulkGet(outs []TxOutId) (data []TxOutData, err error) {
 
 // BulkUpdate Atomic bulk storage update
 func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, height int64, hash chainhash.Hash) (err error) {
+	if s.dirty {
+		return ErrDirtyStorage
+	}
+	
 	if height < 0 {
 		return ErrNegativeHeight
 	}
@@ -416,6 +525,9 @@ func (s *SQLiteStorage) BulkUpdate(insert []primitives.TxOut, remove []TxOutId, 
 
 // BulkUpdate Atomic bulk storage update, but directly from the maps used by cache
 func (s *SQLiteStorage) BulkUpdateFromMap(insert map[TxOutId]TxOutData, remove map[TxOutId]bool, height int64, hash chainhash.Hash) error {
+	if s.dirty {
+		return ErrDirtyStorage
+	}
 
 	if height < 0 {
 		return ErrNegativeHeight
@@ -451,4 +563,17 @@ func (s *SQLiteStorage) BulkUpdateFromMap(insert map[TxOutId]TxOutData, remove m
 	})
 }
 
+// Close DB
+func (s *SQLiteStorage) Close() error {
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
+}
+
+// CleanUp vacuums sqlite database
+func (s *SQLiteStorage) CleanUp() error {
+	_, err := s.db.Exec("VACUUM;")
+	return err 
+}
 

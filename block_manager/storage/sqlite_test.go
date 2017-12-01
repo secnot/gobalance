@@ -3,6 +3,8 @@ package storage
 import(
 	"testing"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
@@ -369,7 +371,6 @@ func TestSQLiteGetByAddress(t *testing.T) {
 		return
 	}
 	
-	
 	storedOuts := mockTxOuts(1000, 1010, 1, 0)
 	storedOuts[0].Addr = "some_address"
 	storedOuts[1].Addr = "some_address"
@@ -439,6 +440,94 @@ func TestSQLiteGetByAddress(t *testing.T) {
 	}
 }
 
+// Test MarkDirty method
+func TestSQLiteMarkDirty(t *testing.T) {
+	// Test once db is dirty all operations fail
+	storage, err := NewSQLiteStorage(":memory:")
+
+	storage.MarkDirty("It's really dirty")
+	
+	txout := primitives.NewTxOut(&primitives.ZeroHash, 1, "some address", 12)
+	txid  := NewTxOutId(&primitives.ZeroHash, 1)
+	
+	// Test all methods fails after sqlite is marked dirty 	
+	if _, err = storage.Len(); err != ErrDirtyStorage {
+		t.Error("Len(): Expecting Dirty Storage Error")
+	}
+
+	if _, _, err := storage.GetLastBlock(); err != ErrDirtyStorage {
+		t.Error("GetLastBlock(): Expecting Dirty Storage Error")
+	}
+
+	if err := storage.SetLastBlock(0, primitives.ZeroHash); err != ErrDirtyStorage {
+		t.Error("SetLastBlock(): Expecting Dirty Storage Error")
+	}
+
+	if _, err := storage.Get(*txid); err != ErrDirtyStorage {
+		t.Error("Get(): Expecting Dirty Storage Error")
+	}
+
+	if err := storage.Set(*txout); err != ErrDirtyStorage {
+		t.Error("Set(): Expecting Dirty Storage Error")
+	}
+	
+	if _, err := storage.GetByAddress("no address"); err != ErrDirtyStorage {
+		t.Error("GetByAddress(): Expecting Dirty Storage Error")
+	}
+
+	if _, err := storage.GetBalance("no address"); err != ErrDirtyStorage {
+		t.Error("GetBalance(): Expecting Dirty Storage Error")
+	}
+	
+	if err := storage.Delete(*txid); err != ErrDirtyStorage {
+		t.Error("Delete(): Expecting Dirty Storage Error")
+	}
+
+	if _, err := storage.Contains(*txid); err != ErrDirtyStorage {
+		t.Error("Contains(): Expecting Dirty Storage Error")
+	}
+
+	outs := append(make([]TxOutId, 0), *txid)
+	if _, err := storage.BulkGet(outs); err != ErrDirtyStorage {
+		t.Error("BulkGet(): Expecting Dirty Storage Error")
+	}
+	
+	insert := append(make([]primitives.TxOut, 0), *txout) 
+	remove := append(make([]TxOutId, 0), *txid)
+	if err := storage.BulkUpdate(insert, remove, 10, primitives.ZeroHash); err != ErrDirtyStorage {
+		t.Error("BulkUpdate(): Expecting Dirty Storage Error")
+	}
+	
+	insertMap := make(map[TxOutId]TxOutData)
+	removeMap := make(map[TxOutId]bool)
+	if err := storage.BulkUpdateFromMap(insertMap, removeMap, 0, primitives.ZeroHash); err != ErrDirtyStorage {
+		t.Error("BulkUpdateFromMap(): Expecting Dirty Storage Error")
+	}
+}
+
+// Test a database marked dirty returns an error when it is opened 
+func TestSQLiteMarkDirtyPersist(t *testing.T) {
+	tmpfile, err := ioutil.TempFile("", "sqlite3_temp_db")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	filename := tmpfile.Name()
+
+	storage, err := NewSQLiteStorage(filename)
+	storage.MarkDirty("It's really dirty")
+	storage.Close()
+
+	// Reopen
+	storage, err = NewSQLiteStorage(filename)
+	if err != ErrDirtyStorage {
+		t.Error("Expectiong dirty storage error, MarkDirty didn't work", err)
+	}
+
+	// Cleanup temp databases
+	defer os.Remove(filename)
+	defer os.Remove(fmt.Sprintf("%s-journal", filename))
+}
 
 // Test BulkGet method
 func TestSQLiteBulkGet(t *testing.T) {
@@ -634,3 +723,26 @@ func TestSQLiteBulkUpdateErrors(t *testing.T) {
 	}
 }
 
+
+// Test CleanUp finishes succesfully
+func TestSQLiteCleanUp(t *testing.T) {
+	storage, err := NewSQLiteStorage(":memory:")
+	if err != nil {
+		t.Error("NewSQLiteStorage(): ", err)
+		return
+	}
+
+	mockOuts := mockTxOuts(0, 10, 1, 0)
+
+	err = storage.Set(mockOuts[1])
+	if err != nil {
+		t.Error("Set(): ", err)
+		return
+	}
+
+	//
+	if err := storage.CleanUp(); err != nil {
+		t.Error("CleanUp(): ", err)
+		return
+	}
+}
