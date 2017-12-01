@@ -367,3 +367,101 @@ func TestBitcoinValueToString(t *testing.T) {
 		}
 	}
 }
+
+// Test coinbase transactions detection
+func TestIsCoinBase(t *testing.T) {
+
+	tx := NewTx(&MainNetGenesisHash)
+
+	// a coin base transaction
+	out := NewTxOut(&ZeroHash, 0xffffffff, "no address", 1337)
+	tx.AddIn(out)
+
+	if !tx.IsCoinBase() {
+		t.Error("IsCoinBase() detection error")
+		return
+	}
+
+	// not coinbase (2 inputs)
+	out2 := NewTxOut(&MainNetGenesisHash, 1, "other address", 22)
+	tx.AddIn(out2)
+
+	if tx.IsCoinBase() {
+		t.Error("IsCoinBase() a transaction with two inputs shouldn't be coinbase")
+		return
+	}
+
+	// not coinbase (0 inputs)
+	tx.In = nil
+
+	if tx.IsCoinBase() {
+		t.Error("IsCoinBase() a transaction with no inputs shouldn't be coinbase")
+		return
+	}
+
+	// not coinbase (prevout index != max uint32)
+	out3 := NewTxOut(&ZeroHash, 1, "no address", 1337)
+	tx.AddIn(out3)
+
+	if tx.IsCoinBase() {
+		t.Error("IsCoinBase() an input with invalid index two shouldn't be coinbase")
+		return
+	}
+
+	// not coinbase (prevout hash  != zerohash)
+	out4 := NewTxOut(&MainNetGenesisHash, 0xffffffff, "other address", 22)
+	tx.In = nil
+	tx.AddIn(out4)
+
+	if tx.IsCoinBase() {
+		t.Error("IsCoinbase() an input with a non zero hash shouldn't be coinbase")
+		return
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

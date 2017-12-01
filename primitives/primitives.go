@@ -3,6 +3,7 @@ package primitives
 
 import (
 	"strconv"
+	"math"
 	"bytes"
 	"fmt"
 
@@ -110,6 +111,22 @@ func (t *Tx) AddIn(in *TxOut) {
 // Add Output to transaction
 func (t *Tx) AddOut(out *TxOut) {
 	t.Out = append(t.Out, out)
+}
+
+// IsCoinBase determines wheter the transaction is coinbase
+func (t *Tx) IsCoinBase() bool {
+
+	// A coin base must only have one transaction input
+	if len(t.In) != 1 {
+		return false
+	}
+
+	// The previous output hash must be zero and max index
+	if !t.In[0].TxHash.IsEqual(&ZeroHash) || t.In[0].Nout != math.MaxUint32 {
+		return false
+	}
+
+	return true
 }
 
 // forEachAddress calls a function once for each address in the transaction
