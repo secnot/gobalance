@@ -29,6 +29,9 @@ type StorageCache struct {
 	
 	//
 	balanceIndexEnabled bool
+
+	// Number of blocks added but not yet commited
+	uncommittedBlocks int
 }
 
 // NewStorageCache creates a new cache, with or without balance indexing
@@ -39,12 +42,13 @@ func NewStorageCache(sto Storage, balanceIndex bool) (s *StorageCache, err error
 	}
 
 	cache := StorageCache{
-		sto:       sto,
-		inserts:   make(map[TxOutId]TxOutData, InitialQueueSize),
-		deletions: make(map[TxOutId]bool, InitialQueueSize),
-		balance :  make(map[string]int64, InitialQueueSize),
-		height:    height,
+		sto:                 sto,
+		inserts:             make(map[TxOutId]TxOutData, InitialQueueSize),
+		deletions:           make(map[TxOutId]bool, InitialQueueSize),
+		balance :            make(map[string]int64, InitialQueueSize),
+		height:              height,
 		lastBlockHash:       hash,
+		uncommittedBlocks:   0,
 		balanceIndexEnabled: balanceIndex,
 	}
 
@@ -65,6 +69,11 @@ func (s *StorageCache) Len() (length int, err error){
 // UncommitedLen returns the number of uncommitted inserts+deletions
 func (s *StorageCache) UncommittedLen() (size int) {
 	return len(s.inserts) + len(s.deletions)
+}
+
+// UncommittedBlocks returns the number of blocks not co
+func (s *StorageCache) UncommittedBlocks() int {
+	return s.uncommittedBlocks
 }
 
 // SetHeight sets new storage height
@@ -216,8 +225,8 @@ func (s *StorageCache) AddBlock(block *primitives.Block) error {
 
 		// Delete transaction inputs
 		for _, in := range tx.In {
+			s.delTxOut(TxOutId{TxHash: *in.TxHash, Nout: in.Nout})
 			if in.Addr != "" && in.Value != 0 {
-				s.delTxOut(TxOutId{TxHash: *in.TxHash, Nout: in.Nout})
 				s.updateBalance(in.Addr, -in.Value)
 			}
 		}
@@ -226,6 +235,7 @@ func (s *StorageCache) AddBlock(block *primitives.Block) error {
 	// Update height
 	s.SetHeight(int64(block.Height))
 	s.SetHash(block.Hash)
+	s.uncommittedBlocks += 1
 	return nil
 }
 
@@ -253,6 +263,9 @@ func (s *StorageCache) Commit() (err error){
 	s.inserts   = make(map[TxOutId]TxOutData, InitialQueueSize)
 	s.deletions = make(map[TxOutId]bool, InitialQueueSize)
 	s.balance   = make(map[string]int64, InitialQueueSize)
+
+	// All blocks have beeen committed
+	s.uncommittedBlocks = 0
 
 	// Clean inserts and deletions
 	return nil

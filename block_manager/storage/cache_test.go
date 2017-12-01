@@ -67,9 +67,17 @@ func cacheUncommittedLen(t *testing.T, cache *StorageCache, size int) {
 
 // Test cache Len and UncommitedLen
 func TestCacheLen(t *testing.T) {
+	storage, err := NewSQLiteStorage(":memory:")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	cache, err := NewStorageCache(storage, true)
+	if err != nil {
+		t.Error(err)
+		return
+	}
 
-	storage, _ := NewSQLiteStorage(":memory:")
-	cache, _ := NewStorageCache(storage, true)
 	cache.SetHeight(100)
 	cache.SetHash(primitives.MainNetGenesisHash)
 
@@ -155,6 +163,43 @@ func TestCacheLen(t *testing.T) {
 	cacheLen(t, cache, len(outs))
 	cacheUncommittedLen(t, cache, 0)
 }
+
+
+// Test cache uncommitted blocks
+func TestUncommittedBlocks(t *testing.T) {
+	storage, err := NewSQLiteStorage(":memory:")
+	if err != nil {
+		t.Error("NewSQLiteStorage(): ", err)
+		return
+	}
+
+	cache, err := NewStorageCache(storage, true)
+	if err != nil {
+		t.Error("NewStorageCache(): ", err)
+		return
+	}
+
+	if num := cache.UncommittedBlocks(); num != 0 {
+		t.Errorf("UncommittedBlocks(): Expecting 0 returned %s", num)
+		return
+	}
+
+	// Add blocks and check length
+	block := primitives.NewBlock(primitives.MainNetGenesisHash, primitives.ZeroHash, 1)
+	cache.AddBlock(block)	
+	if num := cache.UncommittedBlocks(); num != 1 {
+		t.Errorf("UncommittedBlocks(): Expecting 1 returned %s", num)
+		return
+	}
+
+	// Commit and check it is 0 again
+	cache.Commit()
+	if num := cache.UncommittedBlocks(); num != 0 {
+		t.Errorf("UncommittedBlocks(): Expecting 0 returned %s", num)
+		return
+	}
+}
+
 
 
 // Test SetHash and GetHash methods
