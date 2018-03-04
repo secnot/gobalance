@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 	"errors"
+	"github.com/secnot/simplelru"
 	"github.com/secnot/gobalance/primitives/queue"
 	"github.com/secnot/orderedmap"
 )
@@ -19,6 +20,10 @@ const (
 
 	//
 	DefaultUnreachablePeriod = 30*time.Second
+
+	//
+	DefaultClientPeerCacheSize = 50000
+	DefaultClientPeerPruneSize = 1000
 )
 
 type PeerManager struct {
@@ -52,11 +57,19 @@ type PeerManager struct {
 	// 
 	UnreachablePeriod time.Duration
 
+	//
+	ClientPeerCacheSize int
+
 	// Initial seed peers (format "hostname:port" / "ip:port"
 	Seeds []string
 
 	// peer -> unreachable marks queue
 	peers *orderedmap.OrderedMap
+
+	// Cache that remembers the peer assigned to each client so it's
+	// possible to return the same peer to sucessive requests by the 
+	// same client (if the peer is still available)
+	clientPeerCache *simplelru.LRUCache
 
 	// Channel used by peer routine to send updates on the available peers
 	updateCh  chan *DiscoveryMsg
@@ -97,10 +110,17 @@ func (p *PeerManager) Start() error {
 	if p.UnreachablePeriod == 0 {
 		p.UnreachablePeriod = DefaultUnreachablePeriod
 	}
+	if p.ClientPeerCacheSize < 1 {
+		p.ClientPeerCacheSize = DefaultClientPeerCacheSize
+	}
+	
 
 	//TODO: Return error when port was in use
 	updateCh := handler.Start()
-	
+
+	p.clientPeerCache = simplelru.NewLRUCache(
+		p.ClientPeerCacheSize,
+		DefaultClientPeerPruneSize)
 	p.peers    = orderedmap.NewOrderedMap()
 	p.handler  = handler
 	p.updateCh = updateCh
@@ -159,9 +179,7 @@ func (p *PeerManager) PeerUpdateRoutine() {
 }
 
 // GetPeer returns address (ip:port) of one of the peers (round robin)
-func (p *PeerManager) GetPeer() (string, error) {
-	p.Lock()
-	defer p.Unlock()
+func (p *PeerManager) getPeer() (string, error) {
 	if !p.started {
 		return "", ErrNoPeersAvailable
 	}
@@ -172,8 +190,37 @@ func (p *PeerManager) GetPeer() (string, error) {
 	}
 
 	p.peers.MoveLast(peer.(string))
-
 	return peer.(string), nil
+}
+
+// GetPeer returns address (ip:port) of one of the peers (round robin)
+func (p *PeerManager) GetPeer() (string, error) {
+	p.Lock()
+	defer p.Unlock()
+	return p.getPeer()
+}
+
+// GetPeerPersistent return  the address (ip:port) of one of the peers, but
+// tries to return the same peer to calls with the same id. 
+// (while available and not purged from cache)
+func (p *PeerManager) GetPeerPersistent(id string) (string, error) {
+	p.Lock()
+	defer p.Unlock()
+
+	// try for cache id
+	if peer, ok := p.clientPeerCache.Get(id); ok {
+		// Client peer is cached check it is available
+		if _, ok := p.peers.Get(peer.(string)); ok {
+			return peer.(string), nil
+		}
+	}
+	
+	// Assign new peer to client
+	peer, err := p.getPeer()
+	if err == nil {
+		p.clientPeerCache.Set(id, peer)
+	}
+	return peer, err
 }
 
 // MarkPeerUnreachable

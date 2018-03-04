@@ -97,6 +97,8 @@ func PeerManagerPropagationHelper(t *testing.T,
 	}
 
 ExitSelect:
+
+	// Test expected available peers
 	m1Peers := GetPeerManagerAvailablePeers(manager1)
 	m2Peers := GetPeerManagerAvailablePeers(manager2)
 	m3Peers := GetPeerManagerAvailablePeers(manager3)
@@ -172,6 +174,56 @@ func TestUnreachableMarks(t *testing.T) {
 		expected  := []string {"127.0.0.1:6001", "127.0.0.1:7001"}
 		if !MapOnlyContains(available, expected) {
 			t.Errorf("Peer 127.0.0.1:8001 wasn't marked unreachable %v\n", available)
+		}
+	}
+
+	// After some time has passed all the peers should be available again
+	allPeers := []string {"127.0.0.1:6001", "127.0.0.1:7001", "127.0.0.1:8001"}
+	PeerManagerPropagationHelper(t, manager1, manager2, manager3,
+		allPeers, allPeers, allPeers, markPeer, 3200*time.Millisecond, 8*time.Second)
+}
+
+// Add unreachable marks until a peer address is marked, then rediscovered
+func TestGetPeerPersistent(t *testing.T) {
+	seeds := []string {"127.0.0.1:6000",}
+	manager1 := CreatePeerManager(6000, 6001, nil,  FullMode)
+	manager2 := CreatePeerManager(7000, 7001, seeds, FullMode)
+	manager3 := CreatePeerManager(8000, 8001, seeds, FullMode)
+	manager1.StatusUpdatePeriod=100*time.Millisecond
+	manager2.StatusUpdatePeriod=100*time.Millisecond
+	manager3.StatusUpdatePeriod=100*time.Millisecond
+
+	markPeer := func(t *testing.T) {
+		peer1, err := manager1.GetPeerPersistent("client1")
+		if err != nil {
+			t.Errorf("GetPeerPersistent(): %v\n", err)
+			return
+		}
+
+		peer2, err := manager1.GetPeerPersistent("client1")
+		if err != nil {
+			t.Errorf("GetPeerPersistent(): %v\n", err)
+			return
+		}
+
+		if peer1 != peer2 {
+			t.Errorf("GetPeerPersistent(): returned two different peers for the same client %v %v\n",
+				peer1, peer2)
+		}
+		manager1.MarkPeerUnreachable(peer1)
+		manager1.MarkPeerUnreachable(peer1)
+		manager1.MarkPeerUnreachable(peer1)
+		time.Sleep(5*time.Millisecond)
+
+		// after marking first peer unreachable it should return a different one
+		peer3, err := manager1.GetPeerPersistent("client1")
+		if err != nil {
+			t.Errorf("GetPeerPersistent(): %v\n", err)
+			return
+		}
+
+		if peer1 == peer3 {
+			t.Errorf("GetPeerPersistent(): After marking a peer unreachable it should have returned a different one\n")
 		}
 	}
 
