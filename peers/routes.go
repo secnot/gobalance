@@ -1,11 +1,11 @@
 package peers
 
 import (
-	"net/http"
-	"github.com/gorilla/mux"
 	"strings"
 	"fmt"
-	"github.com/secnot/gobalance/api"
+	"net/http"
+	"github.com/gorilla/mux"
+	"github.com/secnot/gobalance/logging"
 )
 
 const (
@@ -67,7 +67,7 @@ func NewRouter(urlPrefix string, commandCh chan *DiscoveryMsg, log bool) *mux.Ro
     for _, route := range routes {
 		handler :=  route.Handler
 		if log {
-        	handler = api.NewLoggerHandler(route.Handler, route.Name)
+        	handler = logging.NewLoggerHandler(route.Handler, route.Name)
 		}
         router.
             Methods(route.Method).

@@ -5,7 +5,20 @@ import (
 	"net/http"
 	"strings"
 	"github.com/gorilla/mux"
+	"github.com/secnot/gobalance/logging"
 )
+
+const (
+	// Get address balance
+	BalancePath     = "address"
+
+	// Get height
+	HeightPath		 = "height"
+
+	// Announce
+	RecentTxPath     = "recent_tx"
+)
+
 
 type Route struct {
 	Name        string  // Route name
@@ -16,19 +29,19 @@ type Route struct {
 
 var routes = [...]Route {
 	{
-	"balance",
+	BalancePath,
 	"GET",
 	"/address/{address}",
 	http.HandlerFunc(BalanceHandlerFunc)},
 	
 	{
-	"height",
+	HeightPath,
 	"GET",
 	"/height",
 	http.HandlerFunc(HeightHandlerFunc)},
 
 	{
-	"recent_tx",
+	RecentTxPath,
 	"GET",
 	"/address/{address}/recent_tx",
 	http.HandlerFunc(RecentTxHandlerFunc)},
@@ -65,7 +78,7 @@ func NewRouter(urlPrefix string) *mux.Router {
 
     router := mux.NewRouter().StrictSlash(true)
     for _, route := range routes {
-		loggedHandler := NewLoggerHandler(route.Handler, route.Name)
+		loggedHandler := logging.NewLoggerHandler(route.Handler, route.Name)
         router.
             Methods(route.Method).
             Path(BuildPath(urlPrefix, route.Pattern)).
