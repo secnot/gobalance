@@ -23,6 +23,14 @@ port = 1000
 # bind to given ip address (empty string for all)
 bind = "127.0.0.1" 
 
+[peers]
+port = 4000
+mode = "seed"
+seeds = ["seed1.unknown.com", "seed2.unknown.com",]
+allow_local_ips = true
+unreachable_marks = 10
+unreachable_period = 100
+
 [bitcoind]
 host = "localhost:8000"
 user = "gobalance"

@@ -25,3 +25,10 @@ host = "localhost:8332"
 user = "secnot"
 pass = "12345"
 
+
+[peers]
+# Listen port
+port = 4000
+
+# operation mode full/seed/loadbalance
+mode = "full"

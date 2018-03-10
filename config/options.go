@@ -1,8 +1,10 @@
 package config
 
+/*
 import (
 	"reflect"
 )
+*/
 
 const (
 	// Configuration file default path
@@ -19,12 +21,20 @@ const (
 	DefaultApiPort      = int64(8080)
 	DefaultApiBind      = ""
 
+	// Peers
+	DefaultPeersPort              = int64(9090)
+	DefaultPeersAllowLocalIps     = false
+	DefaultPeersMode              = "full"
+	DefaultPeersUnreachableMarks  = int64(3)
+	DefaultPeersUnreachablePeriod = int64(5)
+
 	//
 	DefaultRecentBlocks     = int64(20)
 	DefaultBalanceCacheSize = int64(100000)
 	DefaultUtxoCacheSize    = int64(200000)
 	DefaultSync				= false
 )
+var DefaultPeersSeeds  = [...]interface{} {}
 
 
 type Option struct {
@@ -32,8 +42,8 @@ type Option struct {
 	// Option name
 	name string
 
-	// Allowed type for the option value
-	typ  reflect.Kind
+	// Validator usde to verify value
+	val ValidatorFunc
 
 	// Default value (nil for none)
 	def  interface{}
@@ -43,66 +53,98 @@ type Option struct {
 var Options = [] Option {
 	// bitcoind
 	{	name: "bitcoind.host",
-		typ:  reflect.String,
+		val:  StringValidator(),
 		def:  DefaultBitcoindHost,
 	},
 
 	{	name: "bitcoind.user",
-		typ:  reflect.String,
+		val: StringValidator(),
 		def:  "",
 	},
 
 	{	name: "bitcoind.pass",
-		typ:  reflect.String,
+		val:  StringValidator(),
 		def:  "",
 	},
 
 	{	name: "bitcoind.chain",
-		typ:  reflect.String,
+		val:  StringValidator(),
 		def:  DefaultBitcoindMainnet,
 	},
 
 	// Api
 	{	name: "api.url_prefix",
-		typ:  reflect.String,
+		val:  StringValidator(),
 		def:  DefaultApiUrlPrefix,
 	},
 
 	{	name: "api.port",
-		typ:  reflect.Int64,
+		val:  Uint16Validator(),
 		def:  DefaultApiPort,
 	},
 
 	{	name: "api.bind",
-		typ:  reflect.String,
+		val:  StringValidator(),
 		def:  DefaultApiBind,
+	},
+
+	// Peers
+	{	name: "peers.port",
+		val:  Uint16Validator(),
+		def:  DefaultPeersPort,
+	},
+
+	{	name: "peers.allow_local_ips",
+		val:  BoolValidator(),
+		def:  DefaultPeersAllowLocalIps,
+	},
+	
+	{   name: "peers.mode",
+		val:  StringValidator(),
+		def:  DefaultPeersMode,
+	},
+
+	{	name: "peers.unreachable_marks",
+		val:  IntegerMinMaxValidator(1, 100000),
+		def:  DefaultPeersUnreachableMarks,
+	},
+	
+	{	name: "peers.unreachable_period",
+		val:  IntegerMinMaxValidator(1, 999999),
+		def:  DefaultPeersUnreachablePeriod,
+	},
+
+	{	name: "peers.seeds",
+		val:  SliceElemValidator(StringValidator()),
+		def:  DefaultPeersSeeds[:],
 	},
 
 	// Base
 	{	name: "workdir",
-		typ:  reflect.String,
+		val:  StringValidator(),
 		def:  DefaultConfigPath,
 	},
 
 	{	name: "recent_blocks",
-		typ:  reflect.Int64,
+		val:  IntegerMinValidator(1),
 		def:  DefaultRecentBlocks,
 	},
 
 	{	name: "utxo_cache_size",
-		typ:  reflect.Int64,
+		val:  IntegerMinValidator(1),
 		def:  DefaultUtxoCacheSize,
 	},
 
 	{	name: "balance_cache_size",
-		typ:  reflect.Int64,
+		val:  IntegerMinValidator(1),
 		def:  DefaultBalanceCacheSize,
 	},
 
 	{	name: "sync",
-		typ:  reflect.Bool,
+		val:  BoolValidator(),
 		def:  DefaultSync,
 	},
 }
 
+// TODO: Check default values against validators.
 

@@ -2,7 +2,6 @@ package config
 
 import (
 	"github.com/spf13/viper"
-	"reflect"
 	"fmt"
 )
 
@@ -43,12 +42,14 @@ func ParseConfig(vip *viper.Viper) (map[string]interface{}, error){
 
 	for _, op := range Options {
 		value := vip.Get(op.name)
-		conf[op.name] = value
-
-		// Check value against option type
-		if value != nil && reflect.TypeOf(value).Kind() != op.typ {
-			return nil, NewConfigError(fmt.Sprintf("%v - Wrong type (%v) expecting %v", op.name, reflect.TypeOf(value).Kind(), op.typ))
+		
+		// Validate value
+		if err := op.val(value); err != nil {
+			msg := fmt.Sprintf("Config Error: %v -> %v", op.name, err.Error())
+			return nil, NewConfigError(msg)
 		}
+
+		conf[op.name] = value
 	}
 
 	return conf, nil

@@ -60,6 +60,41 @@ func TestValidConfigFile(t *testing.T) {
 		t.Errorf("api.bind: Unexpected value")
 	}
 
+	// Test peers option values
+	if data["peers.port"].(int64) != 4000 {
+		t.Errorf("peers.port: Unexpected value")
+	}
+	if data["peers.mode"].(string) != "seed" {
+		t.Errorf("peers.mode: Unexpected value")
+	}
+	if data["peers.allow_local_ips"].(bool) != true {
+		t.Errorf("peers.allow_local_ips: Unexpected value")
+	}
+	if data["peers.unreachable_marks"].(int64) != int64(10) {
+		t.Errorf("peers.ureachable_marks: Unexpected value")
+	}
+	if data["peers.unreachable_period"].(int64) != int64(100) {
+		t.Errorf("peers.ureachable_period: Unexpected value")
+	}
+
+	// Test peers seeds
+	seeds := data["peers.seeds"].([]interface{})
+	if len(seeds) != 2 {
+		t.Errorf("peers.seeds: Expection two seed string returned %v", len(seeds))
+	}
+
+	seedsMap := make(map[string]bool)
+	for _, seed := range seeds {
+		seedsMap[seed.(string)] = true
+	}
+
+	if _, ok := seedsMap["seed1.unknown.com"]; !ok {
+		t.Errorf("peers.seeds: missing seed seed1.unknown.com")
+	}
+	if _, ok := seedsMap["seed2.unknown.com"]; !ok {
+		t.Errorf("peers.seeds: missing seed seed2.unknown.com")
+	}
+
 	// Test bitcoind option values
 	if data["bitcoind.host"].(string) != "localhost:8000" {
 		t.Errorf("bitcoind.host: Unexpected value")
@@ -115,6 +150,26 @@ func TestDefaultValuesConfigFile(t *testing.T) {
 	}
 	if data["api.bind"].(string) != DefaultApiBind {
 		t.Errorf("api.bind: Unexpected default value")
+	}
+
+	// Test peers option values
+	if data["peers.port"].(int64) != DefaultPeersPort {
+		t.Errorf("peers.port: Unexpected default value")
+	}
+	if data["peers.allow_local_ips"].(bool) != DefaultPeersAllowLocalIps {
+		t.Errorf("peers.allow_local_ips: Unexpected default value")
+	}
+	if data["peers.mode"].(string) != DefaultPeersMode {
+		t.Errorf("peers.mode: Unexpected default value")
+	}
+	if data["peers.unreachable_marks"].(int64) != DefaultPeersUnreachableMarks {
+		t.Errorf("peers.unreachable_marks: Unexpected default value")
+	}
+	if data["peers.unreachable_period"].(int64) != DefaultPeersUnreachablePeriod {
+		t.Errorf("peers.unreachable_period: Unexpected default value")
+	}
+	if len(data["peers.seeds"].([]interface{})) != 0 {
+		t.Errorf("peers.seeds: Unexpected default value")
 	}
 
 	// Test bitcoind option values
