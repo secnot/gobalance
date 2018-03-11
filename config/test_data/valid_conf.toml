@@ -4,7 +4,7 @@ sync = true
 # Directory where configuration files and utxo DB are stored (default .gobalance)
 workdir = "thatdir"
 
-# Size of the in-memory utxo cache (in MB)
+# Size of the in-memory utxo cache
 utxo_cache_size = 55555
 
 # Number of blocks cached for recent transactions
@@ -35,4 +35,4 @@ unreachable_period = 100
 host = "localhost:8000"
 user = "gobalance"
 pass = "12345"
-chain = "testnet99"
+chain = "testnet3"

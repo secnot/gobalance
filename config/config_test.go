@@ -105,7 +105,7 @@ func TestValidConfigFile(t *testing.T) {
 	if data["bitcoind.pass"].(string) != "12345" {
 		t.Errorf("bitcoind.pass: Unexpected value")
 	}
-	if data["bitcoind.chain"].(string) != "testnet99" {
+	if data["bitcoind.chain"].(string) != "testnet3" {
 		t.Errorf("bitcoind.chain: Unexpected value")
 	}
 }

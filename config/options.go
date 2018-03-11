@@ -146,5 +146,3 @@ var Options = [] Option {
 	},
 }
 
-// TODO: Check default values against validators.
-
