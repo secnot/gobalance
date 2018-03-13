@@ -3,6 +3,7 @@ package peers
 import (
 	"time"
 	"log"
+	"github.com/secnot/gobalance/utils"
 )
 
 const(
@@ -43,7 +44,7 @@ func doResolve(hosts map[string]int, resolvedCh chan string) {
 		return
 	}
 
-	result, err := ResolveHostname(hostname)
+	result, err := utils.ResolveHostname(hostname)
 	if err != nil {
 		// Log on first error
 		if hosts[hostname] == 0 {
@@ -75,11 +76,11 @@ func resolveHostnameRoutine(requestCh, resolvedCh chan string, exitCh chan bool)
 		select {
 		case hostname := <-requestCh:
 			// Check the address needs to be resolved
-			ip, port, err := ParseHost(hostname)
+			ip, port, err := utils.ParseHost(hostname)
 			if err != nil {
 				hosts[hostname] = 0
 			} else {
-				resolvedCh <- HostToString(ip, port)
+				resolvedCh <- utils.HostToString(ip, port)
 			}
 
 		case <-exitCh:

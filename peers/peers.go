@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"bytes"
 	"io/ioutil"
-	//"github.com/secnot/gobalance/block_manager"
+	"github.com/secnot/gobalance/utils"
 )
 
 //var peerClient = &http.Client{Timeout: 2 * time.Second}
@@ -144,12 +144,12 @@ func (p *Peer) Equal(other *Peer) bool {
 
 // Host returns peer api ip:port string
 func (p *Peer) PeerHost() string {
-	return HostToString(p.Ip(), p.PeerPort())
+	return utils.HostToString(p.Ip(), p.PeerPort())
 }
 
 // ApiHost returns balance api ip:port string (or "" if apiPort is not available)
 func (p *Peer) ApiHost() string {
-	return HostToString(p.Ip(), p.ApiPort())
+	return utils.HostToString(p.Ip(), p.ApiPort())
 }
 
 // Url is a helper to build peer protocol urls

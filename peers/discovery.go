@@ -7,6 +7,7 @@ import (
 	"net"
 	"context"
 	"net/http"
+	"github.com/secnot/gobalance/utils"
 	"github.com/secnot/orderedmap"
 )
 
@@ -183,7 +184,7 @@ func (p *PeerHandler) Start() (updateCh chan *DiscoveryMsg){
 	p.startTime         = time.Now()
 
 	// Extract list of host ips
-	p.localIps = GetLocalIPs(true)
+	p.localIps = utils.GetLocalIPs(true)
 	
 	// Lauch http server.
 	address := fmt.Sprintf(":%v", p.PeerPort)
@@ -191,7 +192,7 @@ func (p *PeerHandler) Start() (updateCh chan *DiscoveryMsg){
 
 	// Start resolve hostname routine and queue seed hostnames.
 	go resolveHostnameRoutine(p.resolveRequestCh, p.resolveResponseCh, p.resolveCloseCh)
-	Shuffle(p.SeedNodes, NewRandSource())
+	utils.Shuffle(p.SeedNodes, utils.NewRandSource())
 	for _, seed := range p.SeedNodes {
 		p.resolveRequestCh <- seed
 	}
@@ -286,7 +287,7 @@ func (p *PeerHandler) peerDiscoveryRoutine() {
 				continue
 			}
 		
-			ip, port, err := ParseHost(hostname)
+			ip, port, err := utils.ParseHost(hostname)
 			if err != nil {
 				continue
 			}
@@ -424,7 +425,7 @@ func (p *PeerHandler) setPeerStatus(addr string, status Status) {
 	if peer, ok := p.getPeer(addr); ok {
 		originalReachable := peer.Reachable()
 
-		ip, port, err := ParseHost(addr)
+		ip, port, err := utils.ParseHost(addr)
 		if err != nil {
 			return
 		}

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"encoding/json"
 	"net"
+	"github.com/secnot/gobalance/utils"
 	//"github.com/gorilla/mux"
 )
 
@@ -79,7 +80,7 @@ func (p *PeerAnnouncementHandler) ServeHTTP(writer http.ResponseWriter, request 
 		panic(err)
 	}
 	
-	ip, _, err := ParseHost(request.RemoteAddr)
+	ip, _, err := utils.ParseHost(request.RemoteAddr)
 	if err != nil {
 		panic(err)
 	}
