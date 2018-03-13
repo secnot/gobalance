@@ -28,13 +28,17 @@ const (
 	DefaultPeersUnreachableMarks  = int64(3)
 	DefaultPeersUnreachablePeriod = int64(5)
 
+
 	//
 	DefaultRecentBlocks     = int64(20)
 	DefaultBalanceCacheSize = int64(100000)
 	DefaultUtxoCacheSize    = int64(200000)
 	DefaultSync				= false
+	
 )
+
 var DefaultPeersSeeds  = [...]interface{} {}
+var AllowedPeerModes = [...]string {"full", "seed", "loadbalance"}
 
 
 type Option struct {
@@ -100,7 +104,7 @@ var Options = [] Option {
 	},
 	
 	{   name: "peers.mode",
-		val:  StringValidator(),
+		val:  StringChoiceValidator(AllowedPeerModes[:]...),
 		def:  DefaultPeersMode,
 	},
 
