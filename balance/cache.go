@@ -2,7 +2,6 @@ package balance
 
 
 import (
-	"net"
 	"github.com/secnot/simplelru"
 	"github.com/secnot/gobalance/block_manager"
 	"github.com/secnot/gobalance/primitives"
@@ -64,7 +63,7 @@ func (b *BalanceCache) GetBalance(address string) int64 {
 	}
 
 	// If there was a cache miss retrieve balance from block_manager
-	balance := manager.GetBalance(address)
+	balance := block_manager.GetBalance(address)
 
 	b.cache.Set(address, balance)
 	return balance
