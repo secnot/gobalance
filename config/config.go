@@ -5,6 +5,14 @@ import (
 	"fmt"
 )
 
+
+const (
+	// Configuration file default path
+	DefaultConfigPath     = "$HOME/.gobalance/"
+	DefaultConfigFilename = "conf"
+)
+
+
 // ConfigError()
 type ConfigError struct {
 	s string

@@ -1,6 +1,9 @@
 # Enable or disable default mode
 sync = true
 
+# Peer mode of operation
+mode = "seed"
+
 # Directory where configuration files and utxo DB are stored (default .gobalance)
 workdir = "thatdir"
 
@@ -25,7 +28,6 @@ bind = "127.0.0.1"
 
 [peers]
 port = 4000
-mode = "seed"
 seeds = ["seed1.unknown.com", "seed2.unknown.com",]
 allow_local_ips = true
 unreachable_marks = 10

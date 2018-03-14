@@ -47,7 +47,12 @@ func TestValidConfigFile(t *testing.T) {
 
 	if data["sync"].(bool) != true {
 		t.Errorf("sync: Unexpected value")
+	}	
+	
+	if data["mode"].(string) != "seed" {
+		t.Errorf("peers.mode: Unexpected value")
 	}
+
 	
 	// Test api option values
 	if data["api.url_prefix"].(string) != "/api/v1/" {
@@ -63,9 +68,6 @@ func TestValidConfigFile(t *testing.T) {
 	// Test peers option values
 	if data["peers.port"].(int64) != 4000 {
 		t.Errorf("peers.port: Unexpected value")
-	}
-	if data["peers.mode"].(string) != "seed" {
-		t.Errorf("peers.mode: Unexpected value")
 	}
 	if data["peers.allow_local_ips"].(bool) != true {
 		t.Errorf("peers.allow_local_ips: Unexpected value")
@@ -139,6 +141,10 @@ func TestDefaultValuesConfigFile(t *testing.T) {
 	
 	if data["sync"].(bool) != false {
 		t.Errorf("sync: Unexpected default value")
+	}	
+	
+	if data["mode"].(string) != DefaultMode {
+		t.Errorf("peers.mode: Unexpected default value")
 	}
 	
 	// Test api option values
@@ -158,9 +164,6 @@ func TestDefaultValuesConfigFile(t *testing.T) {
 	}
 	if data["peers.allow_local_ips"].(bool) != DefaultPeersAllowLocalIps {
 		t.Errorf("peers.allow_local_ips: Unexpected default value")
-	}
-	if data["peers.mode"].(string) != DefaultPeersMode {
-		t.Errorf("peers.mode: Unexpected default value")
 	}
 	if data["peers.unreachable_marks"].(int64) != DefaultPeersUnreachableMarks {
 		t.Errorf("peers.unreachable_marks: Unexpected default value")

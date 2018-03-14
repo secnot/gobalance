@@ -1,16 +1,6 @@
 package config
 
-/*
-import (
-	"reflect"
-)
-*/
-
 const (
-	// Configuration file default path
-	DefaultConfigPath     = "$HOME/.gobalance/"
-	DefaultConfigFilename = "conf"
-
 	// Bitcoind
 	DefaultBitcoindHost     = "localhost:8332"
 	DefaultBitcoindMainnet  = "mainnet"
@@ -24,7 +14,6 @@ const (
 	// Peers
 	DefaultPeersPort              = int64(9090)
 	DefaultPeersAllowLocalIps     = false
-	DefaultPeersMode              = "full"
 	DefaultPeersUnreachableMarks  = int64(3)
 	DefaultPeersUnreachablePeriod = int64(5)
 
@@ -34,7 +23,7 @@ const (
 	DefaultBalanceCacheSize = int64(100000)
 	DefaultUtxoCacheSize    = int64(200000)
 	DefaultSync				= false
-	
+	DefaultMode             = "full"
 )
 
 var DefaultPeersSeeds  = [...]interface{} {}
@@ -103,11 +92,6 @@ var Options = [] Option {
 		def:  DefaultPeersAllowLocalIps,
 	},
 	
-	{   name: "peers.mode",
-		val:  StringChoiceValidator(AllowedPeerModes[:]...),
-		def:  DefaultPeersMode,
-	},
-
 	{	name: "peers.unreachable_marks",
 		val:  IntegerMinMaxValidator(1, 100000),
 		def:  DefaultPeersUnreachableMarks,
@@ -142,6 +126,11 @@ var Options = [] Option {
 	{	name: "balance_cache_size",
 		val:  IntegerMinValidator(1),
 		def:  DefaultBalanceCacheSize,
+	},
+	
+	{   name: "mode",
+		val:  StringChoiceValidator(AllowedPeerModes[:]...),
+		def:  DefaultMode,
 	},
 
 	{	name: "sync",
