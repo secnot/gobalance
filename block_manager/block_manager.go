@@ -61,6 +61,29 @@ type BlockManager struct {
 	
 	// subscriberts
 	subscribers map[UpdateChan] bool
+	
+	// CONTROL CHANNELS
+
+	// New subscription channel
+	SubscribeChan   chan UpdateChan
+
+	// Unsubscribe existing subscription channel
+	UnsubscribeChan chan UpdateChan
+
+	// Signal crawler to start fetching.
+	StartChan       chan chan bool
+
+	// Signal crawler to stop fetching and exit.
+	StopChan        chan chan bool
+
+	// Balance request channel
+	BalanceChan     chan BalanceRequest
+
+	// Height request channel 
+	HeightChan      chan chan int64
+
+	// Sync status request channel
+	SyncChan        chan chan bool
 }
 
 // Start initializes and launches BlockManager routines
@@ -90,7 +113,16 @@ func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.Update
 
 	// Initialize subscribers
 	b.subscribers = make(map[UpdateChan]bool)
-	
+
+	// Initialize channels
+	b.SubscribeChan   = make(chan UpdateChan, 10)
+	b.UnsubscribeChan = make(chan UpdateChan)
+	b.StartChan       = make(chan chan bool)
+	b.StopChan        = make(chan chan bool)
+	b.BalanceChan     = make(chan BalanceRequest, BalanceRequestQueueSize)
+	b.HeightChan      = make(chan chan int64)
+	b.SyncChan        = make(chan chan bool)
+
 	// Launch main routine
 	go b.managerRoutine(blockUpdateChan)
 	
@@ -99,12 +131,11 @@ func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.Update
 
 // Stop crawler blocks until successfull exit
 func (b *BlockManager) Stop() {
-	ch := make(chan bool)
-	StopChan <- ch
+	doneCh := make(chan bool)
+	b.StopChan <- doneCh
 
 	// Wait until it has stopped
-	<- ch
-
+	<- doneCh
 }
 
 // getBlockIntpus populates transactions inputs address and value
@@ -321,7 +352,7 @@ func (b *BlockManager) Commit() error {
 }
 
 // GetBalance returns address balance
-func (b *BlockManager) GetBalance(address string) (int64, error) {
+func (b *BlockManager) getBalance(address string) (int64, error) {
 	pendingBalance, ok := b.pendingBlocks.GetBalance(address)
 	if !ok {
 		pendingBalance = 0
@@ -335,7 +366,7 @@ func (b *BlockManager) GetBalance(address string) (int64, error) {
 }
 
 // Synced returns true when the manager is with the last blockchain block
-func (b *BlockManager) Synced() bool {
+func (b *BlockManager) synced() bool {
 	return b.TimeSinceLastBlock() > 30.0
 }
 
@@ -402,26 +433,26 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 	var subscribers = make(map[UpdateChan]bool)
 
 	// Start logging routine for new blocks and backtracks
-	go Logger()
+	go Logger(b)
 
 	// Accept subscriptions and wait until the start signal is received
 	// Fetch blocks until the stop signal is received
 	for {
 		select {		
 			// Subscription request
-			case subscriber := <-SubscribeChan:
+			case subscriber := <-b.SubscribeChan:
 				subscribers[subscriber] = true
 
 			// Unsusbription request
-			case subscriber := <-UnsubscribeChan:
+			case subscriber := <-b.UnsubscribeChan:
 				delete(subscribers, subscriber)
 
 			// Current height
-			case ch := <- HeightChan:
+			case ch := <- b.HeightChan:
 				ch <- b.height
 
 			// Stop crawler and exit
-			case ch := <-StopChan:
+			case ch := <- b.StopChan:
 				ch <- true	// signal stopped
 				// TODO: Stop logger
 				break
@@ -443,7 +474,7 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 				}
 
 			// Commit timer expired
-			case <-b.commitTimer.C:
+			case <- b.commitTimer.C:
 
 				b.stopCommitTimer()
 				if b.CommitRequired() {
@@ -452,14 +483,52 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 				}
 
 			// Request balance for one address.
-			case req := <-BalanceChan:
-				balance, err := b.GetBalance(req.Address)
+			case req := <- b.BalanceChan:
+				balance, err := b.getBalance(req.Address)
 				req.Resp <- BalanceResponse{Balance: balance, Err: err}
 
-			case ch := <-SyncChan:
-				ch <- b.Synced()
+			case ch := <- b.SyncChan:
+				ch <- b.synced()
 		}
 	}
 }
 
 
+// Subscribe to crawler helper that returns channel where updates are sent
+func (b *BlockManager) Subscribe(chanSize uint) UpdateChan {
+	ch := make(UpdateChan, int(chanSize))
+	b.SubscribeChan <- ch
+	return ch
+}
+
+// Unsubscribe from crawler
+func (b *BlockManager) Unsubscribe(ch UpdateChan) {
+	b.UnsubscribeChan <- ch
+}
+
+// GetBalance sends a request for the balance of an address and returns the channel
+// where the response will be sent
+func (b *BlockManager) GetBalance(address string) int64 {
+
+	// Channel that will be used by crawler to send the response
+	responseCh := make(chan BalanceResponse)
+	b.BalanceChan <- BalanceRequest{ Address: address, Resp: responseCh}
+	balance := <- responseCh
+	return balance.Balance
+}
+
+// GetHeight returs current height
+func (b *BlockManager) GetHeight() int64 {
+	responseCh := make(chan int64)
+	b.HeightChan <- responseCh
+	height := <- responseCh
+	return height
+}
+
+// Wait until the manager is synced
+func (b *BlockManager) Synced() bool {
+	responseChan := make(chan bool)
+	b.SyncChan <- responseChan
+
+	return <- responseChan
+}
