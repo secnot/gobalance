@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"encoding/json"
 
+	"github.com/secnot/gobalance/api/common"
 	"github.com/secnot/gobalance/balance"
+	"github.com/secnot/gobalance/utils"
 	"github.com/gorilla/mux"
 )
 
@@ -14,16 +16,23 @@ import (
 func BalanceHandlerFunc(writer http.ResponseWriter, request *http.Request) {
 	vars := mux.Vars(request)
 	address := vars["address"]
-	
-	// Get balance from crawler
-	bal := balance.GetBalance(address)
-	
-	/* TODO: Handle errors and response error message
-	if balance.Err != nil {
-		...
+		
+	// Use requester ip	as its identification
+	ip, _, err := utils.ParseHost(request.RemoteAddr)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	*/
-	response := Address {
+
+	// Request balance
+	bal, err := balance.GetBalance(address, ip)
+	if err != nil {
+		 http.Error(writer, err.Error(), http.StatusInternalServerError)
+		 return
+	}
+	
+	// Send response back.
+	response := api_common.Address {
 		Address: address,
 		Balance: bal,
 	}

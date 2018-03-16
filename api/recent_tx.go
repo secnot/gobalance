@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"encoding/json"
 
+	"github.com/secnot/gobalance/api/common"
 	"github.com/secnot/gobalance/recent_tx"
 	"github.com/gorilla/mux"
 )
@@ -14,23 +15,21 @@ func RecentTxHandlerFunc(writer http.ResponseWriter, request *http.Request) {
 	address := vars["address"]
 	
 	// Get balance from crawler
-	//transactions, blocks := recent.GetRecentTx(address)
-	transactions, _ := recent.GetRecentTx(address)
+	transactions, _, err := recent.GetRecentTx(address)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	response := make([]Tx, len(transactions))
+	response := make([]api_common.Tx, len(transactions))
 	for n, tx := range transactions {
 	
-		response[n] = Tx {
+		response[n] = api_common.Tx {
 			Hash: tx.Hash.String(),
 			
 		}	
 	}
 
-	/* TODO: Handle errors and response error message
-	if balance.Err != nil {
-		...
-	}
-	*/
 	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	if err := json.NewEncoder(writer).Encode(response); err != nil {
 		panic(err)

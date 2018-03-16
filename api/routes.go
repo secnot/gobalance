@@ -6,6 +6,7 @@ import (
 	"strings"
 	"github.com/gorilla/mux"
 	"github.com/secnot/gobalance/logging"
+	"github.com/secnot/gobalance/api/common"
 )
 
 const (
@@ -29,19 +30,19 @@ type Route struct {
 
 var routes = [...]Route {
 	{
-	BalancePath,
+	api_common.BalancePath,
 	"GET",
 	"/address/{address}",
 	http.HandlerFunc(BalanceHandlerFunc)},
 	
 	{
-	HeightPath,
+	api_common.HeightPath,
 	"GET",
 	"/height",
 	http.HandlerFunc(HeightHandlerFunc)},
 
 	{
-	RecentTxPath,
+	api_common.RecentTxPath,
 	"GET",
 	"/address/{address}/recent_tx",
 	http.HandlerFunc(RecentTxHandlerFunc)},
