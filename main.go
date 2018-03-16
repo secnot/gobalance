@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"math/rand"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 
 	"github.com/secnot/gobalance/crawler"
+	"github.com/secnot/gobalance/peers"
 	"github.com/secnot/gobalance/block_manager"
 	"github.com/secnot/gobalance/block_manager/storage"
 	"github.com/secnot/gobalance/recent_tx"
@@ -31,11 +33,12 @@ const (
 )
 
 var utxoStorage storage.Storage 
+var manager block_manager.BlockManager
 
 // CleanUp gracefully stop all routines
 func CleanUp(vacuum bool) {		
 	crawler.Stop()
-	block_manager.Stop()
+	manager.Stop()
 
 	if utxoStorage != nil {
 		if vacuum {
@@ -57,6 +60,7 @@ func ExitHandler(c chan os.Signal) {
 		os.Exit(1)
 	}
 }
+
 
 func main() {
 
@@ -99,7 +103,9 @@ func main() {
 		log.Panic(err)
 	}
 
+
 	// Launch Crawler
+	///////////////////
 	lastHeight, lastBlockHash, err := utxoStorage.GetLastBlock()
 	if err != nil {
 		log.Panic(err)
@@ -107,21 +113,60 @@ func main() {
 
 	go crawler.Crawler(rpcConf, uint64(lastHeight+1), lastBlockHash)
 
+
 	// Launch Block Manager
+	/////////////////////////
 	updateChan := crawler.Subscribe(10)
-	
-	go block_manager.Manager(
-		utxoStorage, 
-		int(conf["utxo_cache_size"].(int64)), 
-		uint16(conf["recent_blocks"].(int64)), 
-		updateChan,
-		conf["sync"].(bool), // Enable sync mode
-	)
+
+	rand.Seed(time.Now().UnixNano())
+	blockM :=  &block_manager.BlockManager {
+		Sync:           conf["sync"].(bool),
+		Confirmations:  uint16(conf["recent_blocks"].(int64)), 
+		CommitSize:     int(conf["utxo_cache_size"].(int64)), 
+		
+		// Number of "confirmed" blocks before a commit starts (when not in sync mode)
+		CommitMinBlocks: int(rand.Int31n(10)+1),
+		
+		// from 0 to 119 seconds delay from the moment a commit is required and when it starts
+		CommitDelay:     time.Duration(rand.Intn(120))*time.Second,
+	}
+	blockM.Start(utxoStorage, updateChan)
 	
 
+	// Configure Peermanager
+	////////////////////////
+	peerSeeds := make([]string, len(conf["peers.seeds"].([]interface{})))
+	for i, peer := range conf["peers.seeds"].([]interface{}) {
+		peerSeeds[i] = peer.(string)
+	}
+	
+	peerM := &peers.PeerManager {
+		Mode:         peers.PeerMode(conf["mode"].(string)),
+		PeerPort:     uint16(conf["peers.port"].(int64)),
+		BalancePort:  uint16(conf["api.port"].(int64)),
+		Version:      "0.0.1",
+		Seeds:        peerSeeds,
+		AllowLocalIP: conf["peers.allow_local_ips"].(bool),
+	
+		UnreachableMarks:  uint32(conf["peers.unreachable_marks"].(int64)), 
+		UnreachablePeriod: time.Duration(conf["peers.unreachable_period"].(int64)) * time.Second,
+	}
+
+
+	// Initialize balance API services
+	////////////////////////////////////
 	if !conf["sync"].(bool) {
+
+		// Launch peer service 
+		peerM.Start()
+
 		// Launch balance cache routine
-		go balance.BalanceRoutine(int(conf["balance_cache_size"].(int64)))
+		bal := balance.BalanceProxy	{
+			BlockM:    blockM,
+			PeerM :    peerM,
+			CacheSize: int(conf["balance_cache_size"].(int64)),
+		}
+		go bal.Start()
 
 		// Launch recent transactions routine
 		go recent.RecentTxRoutine(uint16(conf["recent_blocks"].(int64)))
@@ -137,19 +182,24 @@ func main() {
 
 	log.Print("Started")
 
-	// Start crawler
+
+	// Start crawling
+	/////////////////
 	crawler.Start()
 
-	// Wait until the blockchain is synced
+
+	// Initial sync
+	///////////////
 	for {
 		time.Sleep(time.Second*10)
 		if block_manager.Synced() {
 			break
 		}
 	}
-	log.Print("Synced")
+	log.Printf("Synced: %v\n", block_manager.GetHeight())
 
 	// When in sync mode vacuum DB and exit
+	///////////////////////////////////////
 	if conf["sync"].(bool) {
 		CleanUp(true)
 		log.Print("Done")
@@ -157,6 +207,7 @@ func main() {
 	}
 
 	// Launch JSON API
+	//////////////////
 	bind := fmt.Sprint("%v:%v", conf["api.bind"].(string), conf["api.port"].(int64))
 	api.StartApi(bind, conf["api.url_prefix"].(string))
 }
