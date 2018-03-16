@@ -62,6 +62,7 @@ func (b *BlockCache) NewBlock(block *primitives.Block) {
 // cointaned the address, together with the blocks containing thos transactions
 func (b *BlockCache) GetAddrRecentTx(address string) ([] *primitives.Tx, [] *primitives.Block) {
 
+	// TODO: Use getPeer when in commit mode.
 	transactions := b.queue.GetTx(address)
 
 	// Get the blocks containing each transaction
@@ -103,12 +104,11 @@ func RecentTxRoutine(cacheSize uint16) {
 	}
 }
 
-//
-func GetRecentTx(address string) ([]*primitives.Tx, []*primitives.Block) {
+func GetRecentTx(address string) ([]*primitives.Tx, []*primitives.Block, error) {
 	responseCh := make(chan TxResponse)
 	
 	TxRequestChan <- TxRequest{Address: address, Response: responseCh}
 	response := <- responseCh
 	close(responseCh)
-	return response.Tx, response.Block
+	return response.Tx, response.Block, nil
 }
