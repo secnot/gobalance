@@ -63,7 +63,7 @@ func (b *BalanceCache) GetBalance(address string) int64 {
 	}
 
 	// If there was a cache miss retrieve balance from block_manager
-	balance := block_manager.GetBalance(address)
+	balance := b.manager.GetBalance(address)
 
 	b.cache.Set(address, balance)
 	return balance
