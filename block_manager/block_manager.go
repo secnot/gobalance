@@ -129,15 +129,6 @@ func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.Update
 	return nil
 }
 
-// Stop crawler blocks until successfull exit
-func (b *BlockManager) Stop() {
-	doneCh := make(chan bool)
-	b.StopChan <- doneCh
-
-	// Wait until it has stopped
-	<- doneCh
-}
-
 // getBlockIntpus populates transactions inputs address and value
 func (b *BlockManager) getBlockInputs(block *primitives.Block) (*primitives.Block, error) {	
 	
@@ -246,13 +237,13 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 }
 
 // TimeSinceLastBlock returns the seconds elapsed since the last block was processed
-func (b *BlockManager) TimeSinceLastBlock() float64 {
+func (b *BlockManager) timeSinceLastBlock() float64 {
 	now := time.Now()
 	return now.Sub(b.lastTime).Seconds() // time since last block
 }
 
 // AddBlock adds a wire.Block to the manager returning primitives.Block equivalent
-func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) (*primitives.Block, error) {
+func (b *BlockManager) addBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) (*primitives.Block, error) {
 	
 	// Generate	block and add it to pending of confirmation block queue
 	pBlock, err := b.buildBlock(blockHash, block, uint64(b.height+1))
@@ -278,17 +269,13 @@ func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 		b.storageCache.AddBlock(confirmedBlock)
 	}
 
-	// Commit cache when there are enough changes
-	if b.CommitRequired() {
-	
-	}
 	b.lastTime = time.Now()
 
 	return pBlock, nil
 }
 
 // BacktrackBlock backtracks and returns last block
-func (b *BlockManager) BacktrackBlock() (*primitives.Block, error){
+func (b *BlockManager) backtrackBlock() (*primitives.Block, error){
 	if b.pendingBlocks.Len() == 0 {
 		return nil, ErrBacktrackLimit
 	}
@@ -298,22 +285,17 @@ func (b *BlockManager) BacktrackBlock() (*primitives.Block, error){
 	return block, nil
 }
 
-// GetHeight returns the last block height
-func (b *BlockManager) Height() int64 {
-	return b.height
-}
-
 // UncommittedBlocks returns the number of blocks confirmed and already in storage
 // cache but not yet committed
-func  (b *BlockManager) UncommittedBlocks() int {
+func  (b *BlockManager) uncommittedBlocks() int {
 	return b.storageCache.UncommittedBlocks()
 }
 
-// IsCommitReady returns true if it's time for a commit
-func (b *BlockManager)CommitRequired() bool {
+// CommitRequired returns true if it's time for a commit
+func (b *BlockManager)commitRequired() bool {
 	
 	// Check there is something to commit
-	if b.UncommittedBlocks() < 1 {
+	if b.uncommittedBlocks() < 1 {
 		return false
 	}
 
@@ -326,14 +308,14 @@ func (b *BlockManager)CommitRequired() bool {
 	// chain is reached, so if too much time has passed since the previous block
 	// the top has been probably been reached
 	if b.Sync {
-		if b.TimeSinceLastBlock() > 120.0 {
+		if b.timeSinceLastBlock() > 120.0 {
 			return true
 		}
 		return false
 	}
 
 	// Normal mode: commit when min uncommited blocks are reached
-	if b.UncommittedBlocks() > b.CommitMinBlocks {
+	if b.uncommittedBlocks() > b.CommitMinBlocks {
 		return true
 	}
 
@@ -341,7 +323,7 @@ func (b *BlockManager)CommitRequired() bool {
 }
 
 // Commit all cached blocks to storage
-func (b *BlockManager) Commit() error {	
+func (b *BlockManager) commit() error {	
 	log.Print("Commit: ", b.storageCache.GetHeight())
 	err := b.storageCache.Commit()
 	if err != nil {
@@ -367,7 +349,7 @@ func (b *BlockManager) getBalance(address string) (int64, error) {
 
 // Synced returns true when the manager is with the last blockchain block
 func (b *BlockManager) synced() bool {
-	return b.TimeSinceLastBlock() > 30.0
+	return b.timeSinceLastBlock() > 30.0
 }
 
 
@@ -376,11 +358,11 @@ func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (BlockUpda
 	
 	switch update.Class {
 	case crawler.OP_NEWBLOCK:
-		block, err := b.AddBlock(update.Block, update.Hash)
+		block, err := b.addBlock(update.Block, update.Hash)
 		return  NewBlockUpdate(OP_NEWBLOCK, block), err
 	
 	case crawler.OP_BACKTRACK:
-		block, err := b.BacktrackBlock()
+		block, err := b.backtrackBlock()
 		return NewBlockUpdate(OP_BACKTRACK, block), err
 
 	default:
@@ -467,7 +449,7 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 				}
 				b.signalSubscribers(blockUpdate)
 
-				if b.CommitRequired() && !b.commitTimerStarted {
+				if b.commitRequired() && !b.commitTimerStarted {
 					// Signal subscribers a commit is scheduled
 					b.signalSubscribers(NewBlockUpdate(OP_COMMIT, nil))
 					b.startCommitTimer()
@@ -477,8 +459,8 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 			case <- b.commitTimer.C:
 
 				b.stopCommitTimer()
-				if b.CommitRequired() {
-					b.Commit()
+				if b.commitRequired() {
+					b.commit()
 					b.signalSubscribers(NewBlockUpdate(OP_COMMIT_DONE, nil))
 				}
 
@@ -532,3 +514,14 @@ func (b *BlockManager) Synced() bool {
 
 	return <- responseChan
 }
+
+// Stop crawler blocks until successfull exit
+func (b *BlockManager) Stop() {
+	doneCh := make(chan bool)
+	b.StopChan <- doneCh
+
+	// Wait until it has stopped
+	<- doneCh
+}
+
+
