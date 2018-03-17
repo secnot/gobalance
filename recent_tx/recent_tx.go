@@ -1,19 +1,9 @@
-package recent
+package recent_tx
 
 import (
 	"github.com/secnot/gobalance/block_manager"
 	"github.com/secnot/gobalance/primitives"
 )
-
-const (
-	// Size for buffered
-	TxRequestChanSize = 1
-)
-
-var (
-	TxRequestChan = make(chan TxRequest, TxRequestChanSize)
-)
-	
 
 type TxResponse struct {
 	Tx []*primitives.Tx
@@ -26,49 +16,64 @@ type TxRequest struct {
 }
 
 
-type BlockCache struct {
+type RecentTxCache struct {
 
-	// Number of blocks cached
-	size int
+	// max number of blocks cached
+	size uint16
 
 	// 
 	queue *primitives.BlockQueue
+
+	// block manager
+	manager *block_manager.BlockManager
+	
+	// transaction requests
+	requestChan chan TxRequest
+
+	// signal to stop cache
+	stopChan chan chan bool
 }
 
 
-
-func NewBlockCache(size int) *BlockCache {
-	return &BlockCache{
-		size: size,
-		queue: primitives.NewBlockQueue(),
+// NewRecentTxCache 
+func NewRecentTxCache(manager *block_manager.BlockManager, trackedBlocks uint16) *RecentTxCache {
+	cache := &RecentTxCache{
+		requestChan: make(chan TxRequest),
+		stopChan:    make(chan chan bool),
+		manager:     manager,
+		queue:       primitives.NewBlockQueue(),
+		size:        trackedBlocks,
 	}
+
+	go cache.recentTxRoutine()
+	return cache
 }
 
-// Backtrack
-func (b *BlockCache) Backtrack(block *primitives.Block) {
-	b.queue.PopBack()
+// backtrackBlock
+func (r *RecentTxCache) backtrackBlock(block *primitives.Block) {
+	r.queue.PopBack()
 }
 
-// NewBlosck
-func (b *BlockCache) NewBlock(block *primitives.Block) {
-	b.queue.PushBack(block)
-	if b.queue.Len() > b.size {
-		b.queue.PopFront()
+// newBlock
+func (r *RecentTxCache) newBlock(block *primitives.Block) {
+	r.queue.PushBack(block)
+	if r.queue.Len() > int(r.size) {
+		r.queue.PopFront()
 	}
 }
 
 
 // GetAddrRecentTx returns the transactions with in the cached blocks that 
 // cointaned the address, together with the blocks containing thos transactions
-func (b *BlockCache) GetAddrRecentTx(address string) ([] *primitives.Tx, [] *primitives.Block) {
+func (r *RecentTxCache) getAddrRecentTx(address string) ([] *primitives.Tx, [] *primitives.Block) {
 
 	// TODO: Use getPeer when in commit mode.
-	transactions := b.queue.GetTx(address)
+	transactions := r.queue.GetTx(address)
 
 	// Get the blocks containing each transaction
 	blocks := make([]*primitives.Block, len(transactions))
 	for n, tx := range transactions {
-		_, block := b.queue.Tx(*tx.Hash)
+		_, block := r.queue.Tx(*tx.Hash)
 		blocks[n] = block
 	}
 
@@ -78,13 +83,12 @@ func (b *BlockCache) GetAddrRecentTx(address string) ([] *primitives.Tx, [] *pri
 
 
 // RecentTx is the routine handling block updates and client requests
-func RecentTxRoutine(cacheSize uint16) {
+func (r *RecentTxCache) recentTxRoutine() {
 	
-	cache := NewBlockCache(int(cacheSize))
-
 	//
-	updatesChan  := block_manager.Subscribe(10)
+	updatesChan  := r.manager.Subscribe(10)
 
+	//proxy := false
 	for {
 
 		select {
@@ -92,22 +96,43 @@ func RecentTxRoutine(cacheSize uint16) {
 			
 			switch update.Class {
 			case block_manager.OP_NEWBLOCK:
-				cache.NewBlock(update.Block)
+				r.newBlock(update.Block)
 			case block_manager.OP_BACKTRACK:
-				cache.Backtrack(update.Block)
+				r.backtrackBlock(update.Block)
+			
+			/* TODO: Request transactions from proxy when in commit
+			case block_manager.OP_COMMIT:
+				proxy = true
+			case block_manager.OP_COMMIT_DONE:
+				proxy = false
+			*/
 			}
 
-		case request := <- TxRequestChan:
-			tx, blocks := cache.GetAddrRecentTx(request.Address)
+		case request := <- r.requestChan:
+			tx, blocks := r.getAddrRecentTx(request.Address)
 			request.Response <- TxResponse{Tx: tx, Block: blocks}
+		
+		case ch := <- r.stopChan:
+			close(r.stopChan)
+			close(r.requestChan)
+			ch <- true
+			return
 		}
 	}
 }
 
-func GetRecentTx(address string) ([]*primitives.Tx, []*primitives.Block, error) {
+func (r *RecentTxCache) Stop() {
+	doneCh := make(chan bool)
+
+	r.stopChan <- doneCh
+	<- doneCh
+	close(doneCh)
+}
+
+func (r *RecentTxCache) GetRecentTx(address string) ([]*primitives.Tx, []*primitives.Block, error) {
 	responseCh := make(chan TxResponse)
 	
-	TxRequestChan <- TxRequest{Address: address, Response: responseCh}
+	r.requestChan <- TxRequest{Address: address, Response: responseCh}
 	response := <- responseCh
 	close(responseCh)
 	return response.Tx, response.Block, nil
