@@ -27,12 +27,12 @@ type BalanceResponse struct {
 
 
 // BalanceProxy
-type BalanceProxy struct {
+type BalanceCache struct {
 	BlockM    *block_manager.BlockManager
 	PeerM     *peers.PeerManager
 	CacheSize int
 	
-	cache     *BalanceCache
+	cache     *Cache
 	
 	// Control channels
 	RequestChan chan BalanceRequest
@@ -40,23 +40,23 @@ type BalanceProxy struct {
 }
 
 // 
-var proxyClient = &http.Client{
+var proxyClient = &http.Client {
 	Timeout:    2 * time.Second,
 	Transport : &http.Transport{MaxIdleConnsPerHost: 20},
 }
 
 
 // Initialize and start proxy
-func (b *BalanceProxy) Start(){
+func (b *BalanceCache) Start(){
 	
-	b.cache   = NewBalanceCache(b.CacheSize, b.BlockM)
+	b.cache   = NewCache(b.CacheSize, b.BlockM)
 	b.RequestChan   = make(chan BalanceRequest, 100)
 	b.StopChan      = make(chan chan bool)
 	go b.balanceRoutine()
 }
 
 // 
-func (b *BalanceProxy) requestProxyBalance(request BalanceRequest) {
+func (b *BalanceCache) requestProxyBalance(request BalanceRequest) {
 
 	remotePeer, err := b.PeerM.GetPeerPersistent(request.IP.String())
 	url := fmt.Sprintf("http://%s/%s", remotePeer, api_common.BalancePath)
@@ -79,7 +79,7 @@ func (b *BalanceProxy) requestProxyBalance(request BalanceRequest) {
 }
 
 // balanceRoutine handles all incoming requests
-func (b *BalanceProxy) balanceRoutine() {
+func (b *BalanceCache) balanceRoutine() {
 
 	updateChan := b.BlockM.Subscribe(10)
 	
@@ -121,7 +121,7 @@ func (b *BalanceProxy) balanceRoutine() {
 }
 
 // Request
-func (b *BalanceProxy) GetBalance(address string, ip net.IP) (balance int64, err error) {	
+func (b *BalanceCache) GetBalance(address string, ip net.IP) (balance int64, err error) {	
 	responseCh := make(chan BalanceResponse)
 	b.RequestChan <- BalanceRequest{Address: address, ResponseCh: responseCh, IP: ip}
 	response :=  <- responseCh
@@ -129,7 +129,7 @@ func (b *BalanceProxy) GetBalance(address string, ip net.IP) (balance int64, err
 	return response.balance, response.err
 }
 
-func (b *BalanceProxy) Stop() {
+func (b *BalanceCache) Stop() {
 	confirmationCh := make(chan bool)
 	b.StopChan <- confirmationCh
 	<- confirmationCh
