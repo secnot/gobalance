@@ -7,6 +7,10 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/secnot/gobalance/logging"
 	"github.com/secnot/gobalance/api/common"
+	
+	"github.com/secnot/gobalance/height"
+	"github.com/secnot/gobalance/balance"
+	"github.com/secnot/gobalance/recent_tx"
 )
 
 const (
@@ -20,12 +24,13 @@ const (
 	RecentTxPath     = "recent_tx"
 )
 
+type HandlerFuncConstructor func (*balance.BalanceCache, *recent_tx.RecentTxCache, *height.HeightCache) http.Handler
 
 type Route struct {
 	Name        string  // Route name
 	Method      string	// HTTP method GET, POST, PUT, ...
 	Pattern     string	// Matching patters
-	Handler     http.Handler
+	HandlerConstructor HandlerFuncConstructor
 }
 
 var routes = [...]Route {
@@ -33,19 +38,19 @@ var routes = [...]Route {
 	api_common.BalancePath,
 	"GET",
 	"/address/{address}",
-	http.HandlerFunc(BalanceHandlerFunc)},
+	BalanceHandlerConstructor},
 	
 	{
 	api_common.HeightPath,
 	"GET",
 	"/height",
-	http.HandlerFunc(HeightHandlerFunc)},
+	HeightHandlerConstructor},
 
 	{
 	api_common.RecentTxPath,
 	"GET",
 	"/address/{address}/recent_tx",
-	http.HandlerFunc(RecentTxHandlerFunc)},
+	RecentTxHandlerConstructor},
 
 	/*
 	// Transactions involving this address in the last few blocks
@@ -75,11 +80,18 @@ func BuildPath(urlPrefix string, path string) string {
 	}
 }
 
-func NewRouter(urlPrefix string) *mux.Router {
+// NewRouter
+func NewRouter(urlPrefix string,
+	balanceC  *balance.BalanceCache, 
+	recentTxC *recent_tx.RecentTxCache,
+	heightC   *height.HeightCache) *mux.Router {
 
     router := mux.NewRouter().StrictSlash(true)
-    for _, route := range routes {
-		loggedHandler := logging.NewLoggerHandler(route.Handler, route.Name)
+   
+	// Add routes
+	for _, route := range routes {
+		handler := route.HandlerConstructor(balanceC, recentTxC, heightC)
+		loggedHandler := logging.NewLoggerHandler(handler, route.Name)
         router.
             Methods(route.Method).
             Path(BuildPath(urlPrefix, route.Pattern)).
