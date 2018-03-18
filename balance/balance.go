@@ -51,10 +51,11 @@ func NewBalanceCache(blockM *block_manager.BlockManager, peerM *peers.PeerManage
 	cache := &BalanceCache {
 		BlockM:    blockM,
 		PeerM :    peerM,
-		CacheSize: cacheSize
+		CacheSize: cacheSize,
 	}
 
 	cache.start()
+	return cache
 }
 
 // Initialize and start proxy
