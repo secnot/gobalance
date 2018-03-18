@@ -46,8 +46,19 @@ var proxyClient = &http.Client {
 }
 
 
+// NewBalanceCache initializes a BalanceCache
+func NewBalanceCache(blockM *block_manager.BlockManager, peerM *peers.PeerManager, cacheSize int) *BalanceCache {
+	cache := &BalanceCache {
+		BlockM:    blockM,
+		PeerM :    peerM,
+		CacheSize: cacheSize
+	}
+
+	cache.start()
+}
+
 // Initialize and start proxy
-func (b *BalanceCache) Start(){
+func (b *BalanceCache) start(){
 	
 	b.cache   = NewCache(b.CacheSize, b.BlockM)
 	b.RequestChan   = make(chan BalanceRequest, 100)
