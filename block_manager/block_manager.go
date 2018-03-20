@@ -427,7 +427,6 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 
 			// Stop crawler and exit
 			case ch := <- b.StopChan:
-				log.Print("Received stop signal")
 				ch <- true	// signal stopped
 				// TODO: Stop logger
 				break
@@ -453,13 +452,11 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 
 			// Commit timer expired
 			case <- b.commitTimer.C:
-				log.Print("Commit timer signal")
 				b.commitTimerStartedFlag = false
 				if b.commitRequired() {
 					b.commit()
 					b.signalSubscribers(NewBlockUpdate(OP_COMMIT_DONE, nil))
 				}
-				log.Print("Commit timer finished")
 
 			// Request balance for one address.
 			case req := <- b.BalanceChan:
