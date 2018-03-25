@@ -64,3 +64,24 @@ type BalanceResponse struct {
 	// Error generated while processing request
 	Err error
 }
+
+// Block manager interface only purpose is to allow mock testing
+type BlockManagerInterface interface {
+	// Subscribe to new block updates
+	Subscribe(chanSize uint) UpdateChan
+
+	// Cancel subscription
+	Unsubscribe(ch UpdateChan)
+
+	// Return address balance
+	GetBalance(address string) int64
+
+	// Get current blockchain height
+	GetHeight() (height int64)
+
+	// Return true if manager synced with bitcoind
+	Synced() (sync bool)
+
+	// Safely stop block manager
+	Stop()
+}

@@ -12,12 +12,12 @@ import (
 
 type Cache struct {
 	size int
-	manager *block_manager.BlockManager
+	manager block_manager.BlockManagerInterface
 	cache *simplelru.LRUCache
 }
 
 //
-func NewCache(size int, manager *block_manager.BlockManager) *Cache {
+func NewCache(size int, manager block_manager.BlockManagerInterface) *Cache {
 	return &Cache{
 		size:    size,
 		manager: manager,

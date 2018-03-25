@@ -9,7 +9,7 @@ import (
 
 type HeightCache struct {
 	sync.RWMutex
-	manager *block_manager.BlockManager
+	manager block_manager.BlockManagerInterface
 	height uint64
 
 	//
@@ -17,7 +17,7 @@ type HeightCache struct {
 }
 
 // NewHeightCache initializes and starts cache
-func NewHeightCache(manager *block_manager.BlockManager) *HeightCache {
+func NewHeightCache(manager block_manager.BlockManagerInterface) *HeightCache {
 	
 	cache := &HeightCache {
 		stopChan: make(chan chan bool),

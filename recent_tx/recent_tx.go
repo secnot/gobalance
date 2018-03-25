@@ -25,7 +25,7 @@ type RecentTxCache struct {
 	queue *primitives.BlockQueue
 
 	// block manager
-	manager *block_manager.BlockManager
+	manager block_manager.BlockManagerInterface
 	
 	// transaction requests
 	requestChan chan TxRequest
@@ -36,7 +36,7 @@ type RecentTxCache struct {
 
 
 // NewRecentTxCache 
-func NewRecentTxCache(manager *block_manager.BlockManager, trackedBlocks uint16) *RecentTxCache {
+func NewRecentTxCache(manager block_manager.BlockManagerInterface, trackedBlocks uint16) *RecentTxCache {
 	cache := &RecentTxCache{
 		requestChan: make(chan TxRequest),
 		stopChan:    make(chan chan bool),

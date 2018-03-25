@@ -28,7 +28,7 @@ type BalanceResponse struct {
 
 // BalanceProxy
 type BalanceCache struct {
-	BlockM    *block_manager.BlockManager
+	BlockM    block_manager.BlockManagerInterface
 	PeerM     *peers.PeerManager
 	CacheSize int
 	
@@ -47,7 +47,7 @@ var proxyClient = &http.Client {
 
 
 // NewBalanceCache initializes a BalanceCache
-func NewBalanceCache(blockM *block_manager.BlockManager, peerM *peers.PeerManager, cacheSize int) *BalanceCache {
+func NewBalanceCache(blockM block_manager.BlockManagerInterface, peerM *peers.PeerManager, cacheSize int) *BalanceCache {
 	cache := &BalanceCache {
 		BlockM:    blockM,
 		PeerM :    peerM,
