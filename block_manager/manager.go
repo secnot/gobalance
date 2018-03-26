@@ -65,66 +65,23 @@ type BalanceResponse struct {
 	Err error
 }
 
-// manager channels
-var (
-	// New subscription channel
-	SubscribeChan   = make(chan UpdateChan, 10)
+// Block manager interface only purpose is to allow mock testing
+type BlockManagerInterface interface {
+	// Subscribe to new block updates
+	Subscribe(chanSize uint) UpdateChan
 
-	// Unsubscribe existing subscription channel
-	UnsubscribeChan = make(chan UpdateChan)
+	// Cancel subscription
+	Unsubscribe(ch UpdateChan)
 
-	// Signal crawler to start fetching.
-	StartChan       = make(chan chan bool)
+	// Return address balance
+	GetBalance(address string) int64
 
-	// Signal crawler to stop fetching and exit.
-	StopChan        = make(chan chan bool)
+	// Get current blockchain height
+	GetHeight() (height int64)
 
-	// Balance request channel
-	BalanceChan     = make(chan BalanceRequest, BalanceRequestQueueSize)
+	// Return true if manager synced with bitcoind
+	Synced() (sync bool)
 
-	// Height request channel 
-	HeightChan      = make(chan chan int64)
-
-	// Sync status request channel
-	SyncChan        = make(chan chan bool)
-)
-
-
-// Subscribe to crawler helper that returns channel where updates are sent
-func Subscribe(chanSize uint) UpdateChan {
-	ch := make(UpdateChan, int(chanSize))
-	SubscribeChan <- ch
-	return ch
-}
-
-// Unsubscribe from crawler
-func Unsubscribe(ch UpdateChan) {
-	UnsubscribeChan <- ch
-}
-
-// GetBalance sends a request for the balance of an address and returns the channel
-// where the response will be sent
-func GetBalance(address string) int64 {
-
-	// Channel that will be used by crawler to send the response
-	responseCh := make(chan BalanceResponse)
-	BalanceChan <- BalanceRequest{ Address: address, Resp: responseCh}
-	balance := <- responseCh
-	return balance.Balance
-}
-
-// GetHeight returs current height
-func GetHeight() int64 {
-	responseCh := make(chan int64)
-	HeightChan <- responseCh
-	height := <- responseCh
-	return height
-}
-
-// Wait until the manager is synced
-func Synced() bool {
-	responseChan := make(chan bool)
-	SyncChan <- responseChan
-
-	return <- responseChan
+	// Safely stop block manager
+	Stop()
 }

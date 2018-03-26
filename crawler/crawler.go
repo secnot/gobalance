@@ -49,22 +49,8 @@ func NewBlockUpdate(class UpdateClass, block *wire.MsgBlock, hash *chainhash.Has
 // Channel type used to send subscriber updates
 type UpdateChan chan BlockUpdate
 
-// Crawler channels
-var (
-	// New subscription channel
-	SubscribeChan   = make(chan UpdateChan)
 
-	// Unsubscribe existing subscription channel
-	UnsubscribeChan = make(chan UpdateChan)
-
-	// Signal crawler to start fetching.
-	StartChan       = make(chan chan bool)
-
-	// Signal crawler to stop fetching and exit.
-	StopChan        = make(chan chan bool)
-)
-
-type CrawlerData struct {
+type Crawler struct {
 	// Channel to signal fetcher routine to stop
 	fetcherStop chan bool
 
@@ -82,27 +68,51 @@ type CrawlerData struct {
 
 	// Hashes for the last n unconfirmed blocks
 	blockQueue *queue.Queue
+	
+	// Crawler interface channels
+	//////////////////////////////
+	// New subscription channel
+	subscribeChan   chan UpdateChan
+
+	// Unsubscribe existing subscription channel
+	unsubscribeChan chan UpdateChan
+
+	// Signal crawler to start fetching.
+	startChan       chan chan bool
+
+	// Signal crawler to stop fetching and exit.
+	stopChan        chan chan bool
 }
 
 // NewCrawler creates a new crawler
-func newCrawlerData(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) (*CrawlerData, error) {
+func NewCrawler(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) (*Crawler, error) {
 
 	blockQueue := queue.New()
 	blockQueue.PushBack(prevBlockHash)
 
 
-	return &CrawlerData{
+	craw := &Crawler{
 		fetcherStop:   nil,
 		fetcherBlocks: nil,
 		rpcConfig:     config,
 		height:        startHeight,
 		subscribers:   make(map [UpdateChan]bool),
 		blockQueue:    blockQueue,
-	}, nil
+
+		//
+		subscribeChan:   make(chan UpdateChan),
+		unsubscribeChan: make(chan UpdateChan),
+		startChan:       make(chan chan bool),
+		stopChan:        make(chan chan bool),
+	}
+
+	go craw.crawlerRoutine()
+
+	return craw, nil
 }
 
 // backtrackBlock backtracks and discards last block and restart fetcher 
-func (c *CrawlerData) backtrackBlock() chainhash.Hash {	
+func (c *Crawler) backtrackBlock() chainhash.Hash {	
 	// BACKTRACK ONE BLOCK
 	if c.blockQueue.Len() == 1 {
 		log.Panic("Backtrack limit reached")
@@ -114,7 +124,7 @@ func (c *CrawlerData) backtrackBlock() chainhash.Hash {
 }
 
 // newBlock adds a new block
-func (c *CrawlerData) newBlock(block *wire.MsgBlock, hash *chainhash.Hash) {	
+func (c *Crawler) newBlock(block *wire.MsgBlock, hash *chainhash.Hash) {	
 	c.height += 1
 	c.blockQueue.PushBack(*hash)
 
@@ -124,7 +134,7 @@ func (c *CrawlerData) newBlock(block *wire.MsgBlock, hash *chainhash.Hash) {
 }
 
 // processBlock process new blockchain block
-func (c *CrawlerData) processBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) {
+func (c *Crawler) processBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) {
 
 	// Verify the block hash and retry if there was a transmission error
 	verifiedHash := block.BlockHash()
@@ -148,7 +158,7 @@ func (c *CrawlerData) processBlock(block *wire.MsgBlock, blockHash *chainhash.Ha
 
 // newFetcher stops current fetcher routine and creates a new one starting at a
 // given height
-func (c *CrawlerData) newFetcher(height uint64) {
+func (c *Crawler) newFetcher(height uint64) {
 	
 	// Stop previous fetcher
 	if c.fetcherStop != nil {
@@ -164,84 +174,82 @@ func (c *CrawlerData) newFetcher(height uint64) {
 }
 
 // notifySubscribers sends a block update to all the subscribers
-func (c *CrawlerData) notifySubscribers(update BlockUpdate) {
+func (c *Crawler) notifySubscribers(update BlockUpdate) {
 	for subscriber, _ := range c.subscribers {
 		subscriber <- update
 	}
 }
 
 // subscribe adds a subscriber to crawler block updates
-func (c *CrawlerData) addSubscriber(subscriber UpdateChan) {
+func (c *Crawler) addSubscriber(subscriber UpdateChan) {
 	c.subscribers[subscriber] = true
 }
 
 // unsubscribe removes a subscriber from crawler block updates
-func (c *CrawlerData) delSubscriber(subscriber UpdateChan) {
+func (c *Crawler) delSubscriber(subscriber UpdateChan) {
 	delete(c.subscribers, subscriber)
 }
 
 // Crawler routine
-func Crawler(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) {
-
-	crawler, _ := newCrawlerData(config, startHeight, prevBlockHash)
+func (c *Crawler) crawlerRoutine() {
 
 	// Accept subscriptions and wait until the start signal is received
 	// Fetch blocks until the stop signal is received
 	for {
 		select {		
 			// Subscription request
-			case subscriber := <-SubscribeChan:
-				crawler.addSubscriber(subscriber)
+			case subscriber := <-c.subscribeChan:
+				c.addSubscriber(subscriber)
 
 			// Unsusbription request
-			case subscriber := <-UnsubscribeChan:
-				crawler.delSubscriber(subscriber)
+			case subscriber := <-c.unsubscribeChan:
+				c.delSubscriber(subscriber)
 
 			// Start crawler
-			case ch := <-StartChan:
-				if crawler.fetcherBlocks == nil {
-					crawler.newFetcher(crawler.height) // Fetch next block
+			case ch := <-c.startChan:
+				if c.fetcherBlocks == nil {
+					c.newFetcher(c.height) // Fetch next block
 				}
 				ch <- true // Signal started
 
 			// Stop crawler and exit
-			case ch := <-StopChan:
+			case ch := <-c.stopChan:
 				// TODO: Force commit to db, close fetcher, close channels, etc...
 				ch <- true	// signal stopped
 				break
 
 			// New block available
-			case record := <-crawler.fetcherBlocks:
-				crawler.processBlock(record.Block, record.BlockHash)
+			case record := <-c.fetcherBlocks:
+				c.processBlock(record.Block, record.BlockHash)
 		}
 	}
 }
 
 // Subscribe to crawler helper that returns channel where updates are sent
-func Subscribe(chanSize uint) UpdateChan {
+func (c *Crawler) Subscribe(chanSize uint) UpdateChan {
 	ch := make(UpdateChan, int(chanSize))
-	SubscribeChan <- ch
+	c.subscribeChan <- ch
 	return ch
 }
 
 // Unsubscribe from crawler
-func Unsubscribe(ch UpdateChan) {
-	UnsubscribeChan <- ch
+func (c *Crawler) Unsubscribe(ch UpdateChan) {
+	c.unsubscribeChan <- ch
 }
 
 // Start starts crawler crawling :), 
-func Start() {
+func (c *Crawler) Start() {
 	ch := make(chan bool)
-	StartChan <- ch
+	c.startChan <- ch
 
 	// Wait until it has started
 	<- ch
 }
 
 // Stop crawler blocks until successfull exit
-func Stop() {	
+func (c *Crawler) Stop() {	
 	ch := make(chan bool)
-	StopChan <- ch
+	c.stopChan <- ch
 
 	// Wait until it has stopped
 	<- ch

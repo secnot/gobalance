@@ -26,6 +26,16 @@ const (
 	DefaultClientPeerPruneSize = 1000
 )
 
+// Peer Manager interface only purpose is testing
+type PeerManagerInterface interface {
+	Start() error
+	Stop()
+	MarkPeerUnreachable(peer string)
+	GetPeer()(string, error)
+	GetPeerPersistent(id string)(string, error)
+}
+
+
 type PeerManager struct {
 	
 	sync.RWMutex
@@ -127,7 +137,7 @@ func (p *PeerManager) Start() error {
 	p.stopCh   = make(chan bool)
 	p.started  = true
 
-	go p.PeerUpdateRoutine()
+	go p.peerUpdateRoutine()
 	return nil
 }
 
@@ -146,7 +156,7 @@ func (p *PeerManager) Stop() {
 }
 
 // PeerUpdateRoutine
-func (p *PeerManager) PeerUpdateRoutine() {
+func (p *PeerManager) peerUpdateRoutine() {
 	
 	p.Lock()
 	updateCh := p.updateCh
@@ -284,3 +294,5 @@ func (p *PeerManager) delPeer(peer string) {
 
 	p.peers.Delete(peer)
 }
+
+

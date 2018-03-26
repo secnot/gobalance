@@ -11,17 +11,7 @@ import (
 	"github.com/secnot/gobalance/block_manager"
 	"github.com/secnot/gobalance/peers"
 	"github.com/secnot/gobalance/api/common"
-	//"github.com/secnot/gobalance/primitives"
 )
-
-
-
-var ( 
-	BalanceRequestChan   = make(chan BalanceRequest, 100)
-	BalanceStopChan      = make(chan chan bool)
-)
-
-
 
 
 type BalanceRequest struct {
@@ -37,30 +27,49 @@ type BalanceResponse struct {
 
 
 // BalanceProxy
-type BalanceProxy struct {
-	BlockM    *block_manager.BlockManager
-	PeerM     *peers.PeerManager
+type BalanceCache struct {
+	BlockM    block_manager.BlockManagerInterface
+	PeerM     peers.PeerManagerInterface
 	CacheSize int
 	
-	cache     *BalanceCache
+	cache     *Cache
+	
+	// Control channels
+	RequestChan chan BalanceRequest
+	StopChan    chan chan bool
 }
 
-var proxyClient = &http.Client{
+// 
+var proxyClient = &http.Client {
 	Timeout:    2 * time.Second,
 	Transport : &http.Transport{MaxIdleConnsPerHost: 20},
 }
 
 
+// NewBalanceCache initializes a BalanceCache
+func NewBalanceCache(blockM block_manager.BlockManagerInterface, 
+					peerM peers.PeerManagerInterface, cacheSize int) *BalanceCache {
+	cache := &BalanceCache {
+		BlockM:    blockM,
+		PeerM :    peerM,
+		CacheSize: cacheSize,
+	}
 
-func (b *BalanceProxy) Start(){
-	
-	b.cache   = NewBalanceCache(b.CacheSize, b.BlockM)
-	go b.BalanceRoutine()
+	cache.start()
+	return cache
 }
 
+// Initialize and start proxy
+func (b *BalanceCache) start(){
+	
+	b.cache   = NewCache(b.CacheSize, b.BlockM)
+	b.RequestChan   = make(chan BalanceRequest, 100)
+	b.StopChan      = make(chan chan bool)
+	go b.balanceRoutine()
+}
 
 // 
-func (b *BalanceProxy) requestProxyBalance(request BalanceRequest) {
+func (b *BalanceCache) requestProxyBalance(request BalanceRequest) {
 
 	remotePeer, err := b.PeerM.GetPeerPersistent(request.IP.String())
 	url := fmt.Sprintf("http://%s/%s", remotePeer, api_common.BalancePath)
@@ -82,10 +91,10 @@ func (b *BalanceProxy) requestProxyBalance(request BalanceRequest) {
 	request.ResponseCh <- BalanceResponse{balance: address.Balance, err: nil}
 }
 
+// balanceRoutine handles all incoming requests
+func (b *BalanceCache) balanceRoutine() {
 
-func (b *BalanceProxy) BalanceRoutine() {
-
-	updateChan := block_manager.Subscribe(10)
+	updateChan := b.BlockM.Subscribe(10)
 	
 	// When the block manager is commiting a block the balance is proxied from another
 	// 
@@ -107,7 +116,7 @@ func (b *BalanceProxy) BalanceRoutine() {
 				proxyMode = false
 			}
 
-		case request := <- BalanceRequestChan:
+		case request := <- b.RequestChan:
 			if !proxyMode {
 				request.ResponseCh <- BalanceResponse{balance: b.cache.GetBalance(request.Address), err: nil}
 			} else {
@@ -115,7 +124,7 @@ func (b *BalanceProxy) BalanceRoutine() {
 				go b.requestProxyBalance(request)
 			}
 	
-		case ch := <- BalanceStopChan:
+		case ch := <- b.StopChan:
 			// TODO: Close all pending requests, and channels????
 			ch <- true
 			return
@@ -125,17 +134,17 @@ func (b *BalanceProxy) BalanceRoutine() {
 }
 
 // Request
-func GetBalance(address string, ip net.IP) (balance int64, err error) {	
+func (b *BalanceCache) GetBalance(address string, ip net.IP) (balance int64, err error) {	
 	responseCh := make(chan BalanceResponse)
-	BalanceRequestChan <- BalanceRequest{Address: address, ResponseCh: responseCh, IP: ip}
+	b.RequestChan <- BalanceRequest{Address: address, ResponseCh: responseCh, IP: ip}
 	response :=  <- responseCh
 	close(responseCh)
 	return response.balance, response.err
 }
 
-func (b *BalanceProxy) Stop() {
+func (b *BalanceCache) Stop() {
 	confirmationCh := make(chan bool)
-	BalanceStopChan <- confirmationCh
+	b.StopChan <- confirmationCh
 	<- confirmationCh
 	close(confirmationCh)
 }

@@ -32,14 +32,13 @@ const (
 	DbFilename = "utxo.db"
 )
 
-var utxoStorage storage.Storage 
-var manager block_manager.BlockManager
 
 // CleanUp gracefully stop all routines
-func CleanUp(vacuum bool) {		
-	crawler.Stop()
-	manager.Stop()
+func CleanUp(blockM *block_manager.BlockManager, utxoStorage storage.Storage, vacuum bool) {		
+	//crawler.Stop()
+	blockM.Stop()
 
+	return
 	if utxoStorage != nil {
 		if vacuum {
 			log.Print("Cleaning Up")
@@ -48,16 +47,6 @@ func CleanUp(vacuum bool) {
 			}
 		}
 		utxoStorage.Close()
-	}
-}
-
-
-// Catch ctrl-c and exit gracefully
-func ExitHandler(c chan os.Signal) {
-	for sig := range c {
-		CleanUp(false)
-		log.Print("Exit: ", sig)
-		os.Exit(1)
 	}
 }
 
@@ -98,7 +87,7 @@ func main() {
 		log.Panic(err)
 	}
 	
-	utxoStorage, err = storage.NewSQLiteStorage(absDbPath)
+	utxoStorage, err := storage.NewSQLiteStorage(absDbPath)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -111,12 +100,12 @@ func main() {
 		log.Panic(err)
 	}
 
-	go crawler.Crawler(rpcConf, uint64(lastHeight+1), lastBlockHash)
-
+	// Start crawler but don't start fetching blocks until Start is called
+	crawlerM, _ := crawler.NewCrawler(rpcConf, uint64(lastHeight+1), lastBlockHash)
 
 	// Launch Block Manager
 	/////////////////////////
-	updateChan := crawler.Subscribe(10)
+	updateChan := crawlerM.Subscribe(10)
 
 	rand.Seed(time.Now().UnixNano())
 	blockM :=  &block_manager.BlockManager {
@@ -155,24 +144,35 @@ func main() {
 
 	// Initialize balance API services
 	////////////////////////////////////
+	var balanceCache  *balance.BalanceCache
+	var recentTxCache *recent_tx.RecentTxCache
+	var heightCache   *height.HeightCache
+
 	if !conf["sync"].(bool) {
 
 		// Launch peer service 
 		peerM.Start()
 
 		// Launch balance cache routine
-		bal := balance.BalanceProxy	{
-			BlockM:    blockM,
-			PeerM :    peerM,
-			CacheSize: int(conf["balance_cache_size"].(int64)),
-		}
-		go bal.Start()
+		balanceCache = balance.NewBalanceCache (blockM, peerM, int(conf["balance_cache_size"].(int64)))
 
 		// Launch recent transactions routine
-		go recent.RecentTxRoutine(uint16(conf["recent_blocks"].(int64)))
+		recentTxCache = recent_tx.NewRecentTxCache(blockM, uint16(conf["recent_blocks"].(int64)))
 
 		// Launch height routine
-		go height.HeightRoutine()
+		heightCache = height.NewHeightCache(blockM)
+	}
+
+	// Build function used to gracefully stop all routines
+	//////////////////////////////////////////////////////
+
+	// Catch ctrl-c and exit gracefully
+	ExitHandler := func(c chan os.Signal) {
+		for sig := range c {		
+			CleanUp(blockM, utxoStorage, false)
+			log.Print("Exit: ", sig)
+			os.Exit(1)
+		}
 	}
 
 	// Catch interrupts to exit gracefully
@@ -185,23 +185,23 @@ func main() {
 
 	// Start crawling
 	/////////////////
-	crawler.Start()
+	crawlerM.Start()
 
 
 	// Initial sync
 	///////////////
 	for {
 		time.Sleep(time.Second*10)
-		if block_manager.Synced() {
+		if blockM.Synced() {
 			break
 		}
 	}
-	log.Printf("Synced: %v\n", block_manager.GetHeight())
+	log.Printf("Synced block: %v\n", blockM.GetHeight())
 
 	// When in sync mode vacuum DB and exit
 	///////////////////////////////////////
 	if conf["sync"].(bool) {
-		CleanUp(true)
+		CleanUp(blockM, utxoStorage, true)
 		log.Print("Done")
 		os.Exit(1)
 	}
@@ -209,6 +209,6 @@ func main() {
 	// Launch JSON API
 	//////////////////
 	bind := fmt.Sprint("%v:%v", conf["api.bind"].(string), conf["api.port"].(int64))
-	api.StartApi(bind, conf["api.url_prefix"].(string))
+	api.StartApi(bind, conf["api.url_prefix"].(string), balanceCache, recentTxCache, heightCache)
 }
 

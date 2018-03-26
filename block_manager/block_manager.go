@@ -57,10 +57,33 @@ type BlockManager struct {
 
 	//
 	commitTimer *time.Timer
-	commitTimerStarted bool
+	commitTimerStartedFlag bool
 	
 	// subscriberts
 	subscribers map[UpdateChan] bool
+	
+	// CONTROL CHANNELS
+
+	// New subscription channel
+	SubscribeChan   chan UpdateChan
+
+	// Unsubscribe existing subscription channel
+	UnsubscribeChan chan UpdateChan
+
+	// Signal crawler to start fetching.
+	StartChan       chan chan bool
+
+	// Signal crawler to stop fetching and exit.
+	StopChan        chan chan bool
+
+	// Balance request channel
+	BalanceChan     chan BalanceRequest
+
+	// Height request channel 
+	HeightChan      chan chan int64
+
+	// Sync status request channel
+	SyncChan        chan chan bool
 }
 
 // Start initializes and launches BlockManager routines
@@ -82,29 +105,30 @@ func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.Update
 	b.storageCache = cache
 	b.height       = cache.GetHeight()
 	
+	// Initialize subscribers
+	b.subscribers = make(map[UpdateChan]bool)
+
+	// Initialize channels
+	b.SubscribeChan   = make(chan UpdateChan, 10)
+	b.UnsubscribeChan = make(chan UpdateChan)
+	b.StartChan       = make(chan chan bool)
+	b.StopChan        = make(chan chan bool)
+	b.BalanceChan     = make(chan BalanceRequest, BalanceRequestQueueSize)
+	b.HeightChan      = make(chan chan int64)
+	b.SyncChan        = make(chan chan bool)
+	
 	// Initialize timer so its channel can be added to select loop, but stop signal
 	b.commitTimer  = time.NewTimer(10*time.Second)
 	b.commitTimer.Stop()
-	b.commitTimerStarted = false
+	b.commitTimerStartedFlag = false
+	
+	// Queue
 	b.pendingBlocks = primitives.NewBlockQueue()
 
-	// Initialize subscribers
-	b.subscribers = make(map[UpdateChan]bool)
-	
 	// Launch main routine
 	go b.managerRoutine(blockUpdateChan)
 	
 	return nil
-}
-
-// Stop crawler blocks until successfull exit
-func (b *BlockManager) Stop() {
-	ch := make(chan bool)
-	StopChan <- ch
-
-	// Wait until it has stopped
-	<- ch
-
 }
 
 // getBlockIntpus populates transactions inputs address and value
@@ -215,13 +239,13 @@ func (b *BlockManager) buildBlock(bHash *chainhash.Hash, block *wire.MsgBlock, h
 }
 
 // TimeSinceLastBlock returns the seconds elapsed since the last block was processed
-func (b *BlockManager) TimeSinceLastBlock() float64 {
+func (b *BlockManager) timeSinceLastBlock() float64 {
 	now := time.Now()
 	return now.Sub(b.lastTime).Seconds() // time since last block
 }
 
 // AddBlock adds a wire.Block to the manager returning primitives.Block equivalent
-func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) (*primitives.Block, error) {
+func (b *BlockManager) addBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) (*primitives.Block, error) {
 	
 	// Generate	block and add it to pending of confirmation block queue
 	pBlock, err := b.buildBlock(blockHash, block, uint64(b.height+1))
@@ -247,17 +271,13 @@ func (b *BlockManager) AddBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 		b.storageCache.AddBlock(confirmedBlock)
 	}
 
-	// Commit cache when there are enough changes
-	if b.CommitRequired() {
-	
-	}
 	b.lastTime = time.Now()
 
 	return pBlock, nil
 }
 
 // BacktrackBlock backtracks and returns last block
-func (b *BlockManager) BacktrackBlock() (*primitives.Block, error){
+func (b *BlockManager) backtrackBlock() (*primitives.Block, error){
 	if b.pendingBlocks.Len() == 0 {
 		return nil, ErrBacktrackLimit
 	}
@@ -267,22 +287,17 @@ func (b *BlockManager) BacktrackBlock() (*primitives.Block, error){
 	return block, nil
 }
 
-// GetHeight returns the last block height
-func (b *BlockManager) Height() int64 {
-	return b.height
-}
-
 // UncommittedBlocks returns the number of blocks confirmed and already in storage
 // cache but not yet committed
-func  (b *BlockManager) UncommittedBlocks() int {
+func  (b *BlockManager) uncommittedBlocks() int {
 	return b.storageCache.UncommittedBlocks()
 }
 
-// IsCommitReady returns true if it's time for a commit
-func (b *BlockManager)CommitRequired() bool {
+// CommitRequired returns true if it's time for a commit
+func (b *BlockManager)commitRequired() bool {
 	
 	// Check there is something to commit
-	if b.UncommittedBlocks() < 1 {
+	if b.uncommittedBlocks() < 1 {
 		return false
 	}
 
@@ -295,14 +310,14 @@ func (b *BlockManager)CommitRequired() bool {
 	// chain is reached, so if too much time has passed since the previous block
 	// the top has been probably been reached
 	if b.Sync {
-		if b.TimeSinceLastBlock() > 120.0 {
+		if b.timeSinceLastBlock() > 120.0 {
 			return true
 		}
 		return false
 	}
 
 	// Normal mode: commit when min uncommited blocks are reached
-	if b.UncommittedBlocks() > b.CommitMinBlocks {
+	if b.uncommittedBlocks() > b.CommitMinBlocks {
 		return true
 	}
 
@@ -310,7 +325,7 @@ func (b *BlockManager)CommitRequired() bool {
 }
 
 // Commit all cached blocks to storage
-func (b *BlockManager) Commit() error {	
+func (b *BlockManager) commit() error {	
 	log.Print("Commit: ", b.storageCache.GetHeight())
 	err := b.storageCache.Commit()
 	if err != nil {
@@ -321,7 +336,7 @@ func (b *BlockManager) Commit() error {
 }
 
 // GetBalance returns address balance
-func (b *BlockManager) GetBalance(address string) (int64, error) {
+func (b *BlockManager) getBalance(address string) (int64, error) {
 	pendingBalance, ok := b.pendingBlocks.GetBalance(address)
 	if !ok {
 		pendingBalance = 0
@@ -335,8 +350,8 @@ func (b *BlockManager) GetBalance(address string) (int64, error) {
 }
 
 // Synced returns true when the manager is with the last blockchain block
-func (b *BlockManager) Synced() bool {
-	return b.TimeSinceLastBlock() > 30.0
+func (b *BlockManager) synced() bool {
+	return b.timeSinceLastBlock() > 30.0
 }
 
 
@@ -345,11 +360,11 @@ func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (BlockUpda
 	
 	switch update.Class {
 	case crawler.OP_NEWBLOCK:
-		block, err := b.AddBlock(update.Block, update.Hash)
+		block, err := b.addBlock(update.Block, update.Hash)
 		return  NewBlockUpdate(OP_NEWBLOCK, block), err
 	
 	case crawler.OP_BACKTRACK:
-		block, err := b.BacktrackBlock()
+		block, err := b.backtrackBlock()
 		return NewBlockUpdate(OP_BACKTRACK, block), err
 
 	default:
@@ -368,31 +383,21 @@ func (b *BlockManager) signalSubscribers(update BlockUpdate) {
 // startCommitTimer
 func (b *BlockManager) startCommitTimer() {
 
-	// If the timer is already set don't reset
-	if b.commitTimerStarted {
-		return
-	}
-
-	b.stopCommitTimer() // Just a precaution
-	
 	// Start timer
 	if b.Sync { // In Sync mode commit as fast as possible
 		b.commitTimer.Reset(10*time.Millisecond)
 	} else {
 		b.commitTimer.Reset(DefaultCommitDelay+b.CommitDelay)
 	}
-
-	b.commitTimerStarted = true
 }
 
-// stopCommitTimer
+// stopCommitTimer stop commit timer prematurely, WARNING: if it is called after
+// the signal channel is read by the main loop it will deadlock
 func (b *BlockManager) stopCommitTimer() {
 	
 	if !b.commitTimer.Stop() {
-		<-b.commitTimer.C
+		<- b.commitTimer.C
 	}
-		
-	b.commitTimerStarted = false
 }
 
 // Block Manager routine handling block update and other requests
@@ -402,26 +407,26 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 	var subscribers = make(map[UpdateChan]bool)
 
 	// Start logging routine for new blocks and backtracks
-	go Logger()
+	go Logger(b)
 
 	// Accept subscriptions and wait until the start signal is received
 	// Fetch blocks until the stop signal is received
 	for {
 		select {		
 			// Subscription request
-			case subscriber := <-SubscribeChan:
+			case subscriber := <-b.SubscribeChan:
 				subscribers[subscriber] = true
 
 			// Unsusbription request
-			case subscriber := <-UnsubscribeChan:
+			case subscriber := <-b.UnsubscribeChan:
 				delete(subscribers, subscriber)
 
 			// Current height
-			case ch := <- HeightChan:
+			case ch := <- b.HeightChan:
 				ch <- b.height
 
 			// Stop crawler and exit
-			case ch := <-StopChan:
+			case ch := <- b.StopChan:
 				ch <- true	// signal stopped
 				// TODO: Stop logger
 				break
@@ -436,30 +441,85 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 				}
 				b.signalSubscribers(blockUpdate)
 
-				if b.CommitRequired() && !b.commitTimerStarted {
+				if b.commitRequired() && !b.commitTimerStartedFlag {
+					// Start commit timer
+					b.commitTimerStartedFlag = true
+					b.startCommitTimer()
+
 					// Signal subscribers a commit is scheduled
 					b.signalSubscribers(NewBlockUpdate(OP_COMMIT, nil))
-					b.startCommitTimer()
 				}
 
 			// Commit timer expired
-			case <-b.commitTimer.C:
-
-				b.stopCommitTimer()
-				if b.CommitRequired() {
-					b.Commit()
+			case <- b.commitTimer.C:
+				b.commitTimerStartedFlag = false
+				if b.commitRequired() {
+					b.commit()
 					b.signalSubscribers(NewBlockUpdate(OP_COMMIT_DONE, nil))
 				}
 
 			// Request balance for one address.
-			case req := <-BalanceChan:
-				balance, err := b.GetBalance(req.Address)
+			case req := <- b.BalanceChan:
+				balance, err := b.getBalance(req.Address)
 				req.Resp <- BalanceResponse{Balance: balance, Err: err}
 
-			case ch := <-SyncChan:
-				ch <- b.Synced()
+			case ch := <- b.SyncChan:
+				ch <- b.synced()
 		}
 	}
+}
+
+
+// Subscribe to crawler helper that returns channel where updates are sent
+func (b *BlockManager) Subscribe(chanSize uint) UpdateChan {
+	ch := make(UpdateChan, int(chanSize))
+	b.SubscribeChan <- ch
+	return ch
+}
+
+// Unsubscribe from crawler
+func (b *BlockManager) Unsubscribe(ch UpdateChan) {
+	b.UnsubscribeChan <- ch
+}
+
+// GetBalance sends a request for the balance of an address and returns the channel
+// where the response will be sent
+func (b *BlockManager) GetBalance(address string) int64 {
+
+	// Channel that will be used by crawler to send the response
+	responseCh := make(chan BalanceResponse)
+	b.BalanceChan <- BalanceRequest{ Address: address, Resp: responseCh}
+	balance := <- responseCh
+	close(responseCh)
+	return balance.Balance
+}
+
+// GetHeight returs current height
+func (b *BlockManager) GetHeight() (height int64) {
+	responseCh := make(chan int64)
+	b.HeightChan <- responseCh
+	height = <- responseCh
+	close(responseCh)
+	return
+}
+
+// Wait until the manager is synced
+func (b *BlockManager) Synced() (sync bool) {
+	responseCh := make(chan bool)
+	b.SyncChan <- responseCh
+	sync = <-responseCh
+	close(responseCh)
+	return
+}
+
+// Stop crawler blocks until successfull exit
+func (b *BlockManager) Stop() {
+	doneCh := make(chan bool)
+	b.StopChan <- doneCh
+
+	// Wait until it has stopped
+	<- doneCh
+	close(doneCh)
 }
 
 

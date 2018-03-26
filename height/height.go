@@ -7,30 +7,67 @@ import (
 
 
 
-var Height uint64 = 0 
-var Lock sync.RWMutex
+type HeightCache struct {
+	sync.RWMutex
+	manager block_manager.BlockManagerInterface
+	height uint64
 
-func HeightRoutine() {	
+	//
+	stopChan chan chan bool
+}
 
-	updateChan := block_manager.Subscribe(10)
+// NewHeightCache initializes and starts cache
+func NewHeightCache(manager block_manager.BlockManagerInterface) *HeightCache {
 	
-	for update := range updateChan{
+	cache := &HeightCache {
+		stopChan: make(chan chan bool),
+		manager:  manager,
+		height:   0,
+	}
 
-		Lock.Lock()
-		switch update.Class {
-		case block_manager.OP_NEWBLOCK:
-			Height = update.Block.Height
-		case block_manager.OP_BACKTRACK:
-			Height = update.Block.Height - 1
+	go cache.heightRoutine()
+	return cache
+}
+
+// heightRoutine handles block updades and stop signal
+func (h *HeightCache) heightRoutine() {	
+
+	updateChan := h.manager.Subscribe(10)
+	
+	for {
+
+		select {
+		case update := <- updateChan:
+			h.Lock()
+			switch update.Class {
+			case block_manager.OP_NEWBLOCK:
+				h.height = update.Block.Height
+			case block_manager.OP_BACKTRACK:
+				h.height = update.Block.Height - 1
+			}
+			h.Unlock()
+
+		case ch := <- h.stopChan:
+			h.manager.Unsubscribe(updateChan)
+			ch <- true
+			
+			return
 		}
-		Lock.Unlock()
 	}
 }
 
+// Stop sends signal and waits for confirmation
+func (h *HeightCache) Stop() {
+	doneCh := make(chan bool)
+	h.stopChan <- doneCh
+	<-doneCh
+	close(doneCh)
+}
 
-func GetHeight() (height uint64) {
-	Lock.RLock()
-	height = Height
-	Lock.RUnlock()
+// GetHeight for the current top of the chain
+func (h *HeightCache) GetHeight() (height uint64) {
+	h.RLock()
+	height = h.height
+	h.RUnlock()
 	return
 }

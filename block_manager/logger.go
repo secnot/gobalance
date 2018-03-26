@@ -5,8 +5,8 @@ import (
 )
 
 
-func Logger() {
-	blocks := Subscribe(10) 
+func Logger(manager *BlockManager) {
+	blocks := manager.Subscribe(10) 
 
 	for update := range blocks {
 		block := update.Block
