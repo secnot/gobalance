@@ -100,12 +100,12 @@ func main() {
 		log.Panic(err)
 	}
 
-	go crawler.Crawler(rpcConf, uint64(lastHeight+1), lastBlockHash)
-
+	// Start crawler but don't start fetching blocks until Start is called
+	crawlerM, _ := crawler.NewCrawler(rpcConf, uint64(lastHeight+1), lastBlockHash)
 
 	// Launch Block Manager
 	/////////////////////////
-	updateChan := crawler.Subscribe(10)
+	updateChan := crawlerM.Subscribe(10)
 
 	rand.Seed(time.Now().UnixNano())
 	blockM :=  &block_manager.BlockManager {
@@ -185,7 +185,7 @@ func main() {
 
 	// Start crawling
 	/////////////////
-	crawler.Start()
+	crawlerM.Start()
 
 
 	// Initial sync
