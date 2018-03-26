@@ -1,0 +1,34 @@
+# Directory where configuration files and utxo DB are stored (default .gobalance)
+workdir = ""
+
+# Size of the in-memory utxo cache (in MB)
+utxo_cache_size = 500
+
+# Number of blocks cached for recent transactions
+recent_blocks = 20
+
+# Number of cached addresses balance
+balance_cache_size = 100000
+
+[api]
+# URL path for the api
+base_url = "/api/"
+
+# Listen port
+port = 8080
+
+# bind to given ip address (empty string for all)
+bind = "" 
+
+[bitcoind]
+host = "localhost:8332"
+user = "secnot"
+pass = "12345"
+
+
+[peers]
+# Listen port
+port = 4000
+
+# operation mode full/seed/loadbalance
+mode = "full"
