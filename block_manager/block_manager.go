@@ -403,9 +403,6 @@ func (b *BlockManager) stopCommitTimer() {
 // Block Manager routine handling block update and other requests
 func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 
-	// Block updates subscribers 
-	var subscribers = make(map[UpdateChan]bool)
-
 	// Start logging routine for new blocks and backtracks
 	go Logger(b)
 
@@ -415,11 +412,11 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 		select {		
 			// Subscription request
 			case subscriber := <-b.SubscribeChan:
-				subscribers[subscriber] = true
+				b.subscribers[subscriber] = true
 
 			// Unsusbription request
 			case subscriber := <-b.UnsubscribeChan:
-				delete(subscribers, subscriber)
+				delete(b.subscribers, subscriber)
 
 			// Current height
 			case ch := <- b.HeightChan:
@@ -433,7 +430,6 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 
 			// New block available
 			case update := <- blockUpdateChan:
-				
 				blockUpdate, err := b.processBlockUpdate(update)
 				if err != nil {
 					log.Panic(err)
