@@ -10,6 +10,7 @@ import (
 	"github.com/secnot/gobalance/height"
 )
 
+// Start api starts server and returns http.Server that can be used to stop it with Shutdown
 func StartApi(address string, urlPrefix string, 
 	balanceC  *balance.BalanceCache, 
 	recentTxC *recent_tx.RecentTxCache,
