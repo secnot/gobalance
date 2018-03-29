@@ -22,7 +22,7 @@ func NewHeightCache(manager block_manager.BlockManagerInterface) *HeightCache {
 	cache := &HeightCache {
 		stopChan: make(chan chan bool),
 		manager:  manager,
-		height:   0,
+		height:   uint64(manager.GetHeight()),
 	}
 
 	go cache.heightRoutine()
