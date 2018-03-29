@@ -18,8 +18,8 @@ func LaunchPeerHttpRoutine(address string, commandCh chan *DiscoveryMsg) *http.S
 		Addr: address,
 		Handler: router,
 		//Transport: tr,
-		ReadTimeout:  1 * time.Second,
-		WriteTimeout: 1 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
 		//Disable HTTP2
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 	}
