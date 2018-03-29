@@ -208,7 +208,11 @@ func main() {
 
 	// Launch JSON API
 	//////////////////
-	bind := fmt.Sprint("%v:%v", conf["api.bind"].(string), conf["api.port"].(int64))
+	bind := fmt.Sprintf("%v:%v", conf["api.bind"].(string), conf["api.port"].(int64))
 	api.StartApi(bind, conf["api.url_prefix"].(string), balanceCache, recentTxCache, heightCache)
+	
+	for {
+		time.Sleep(1*time.Second)
+	}
 }
 
