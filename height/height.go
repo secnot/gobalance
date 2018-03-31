@@ -32,8 +32,10 @@ func NewHeightCache(manager interfaces.BlockManager) *HeightCache {
 // heightRoutine handles block updades and stop signal
 func (h *HeightCache) heightRoutine() {	
 
+	h.Lock()
 	updateChan := h.manager.Subscribe(10)
-	
+	h.Unlock()
+
 	for {
 
 		select {
@@ -43,7 +45,7 @@ func (h *HeightCache) heightRoutine() {
 			case interfaces.OP_NEWBLOCK:
 				h.height = update.Block.Height
 			case interfaces.OP_BACKTRACK:
-				h.height = update.Block.Height - 1
+				h.height--
 			}
 			h.Unlock()
 
