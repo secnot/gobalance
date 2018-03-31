@@ -1,4 +1,4 @@
-package block_manager
+package interfaces
 
 import (
 	"github.com/secnot/gobalance/primitives"
@@ -6,11 +6,6 @@ import (
 
 // Subscriber updates types
 type UpdateClass int
-
-const (
-	// Balance request channel size
-	BalanceRequestQueueSize = 20
-)
 
 const (
 	// Signal a new block in the chain (block included in msg)
@@ -44,29 +39,9 @@ func NewBlockUpdate(class UpdateClass, block *primitives.Block) BlockUpdate{
 // Channel type used to send subscriber updates
 type UpdateChan chan BlockUpdate
 
-// BalanceRequest is used to send balance requests to the crawler
-// throug BalanceChan channel
-type BalanceRequest struct {
-
-	// Bitcoin address
-	Address string
-	
-	// Channel used to send the response
-	Resp chan BalanceResponse
-}
-
-// Balance request response
-type BalanceResponse struct {
-
-	// Bitcoin address balance or 0 if not found
-	Balance int64
-
-	// Error generated while processing request
-	Err error
-}
 
 // Block manager interface only purpose is to allow mock testing
-type BlockManagerInterface interface {
+type BlockManager interface {
 	// Subscribe to new block updates
 	Subscribe(chanSize uint) UpdateChan
 

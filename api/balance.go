@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/secnot/gobalance/api/common"
-	"github.com/secnot/gobalance/height"
-	"github.com/secnot/gobalance/balance"
-	"github.com/secnot/gobalance/recent_tx"
+	"github.com/secnot/gobalance/interfaces"
 	"github.com/secnot/gobalance/utils"
 	"github.com/gorilla/mux"
 )
@@ -15,7 +13,7 @@ import (
 
 
 // Balance Handler function
-func BalanceHandlerConstructor(balanceC *balance.BalanceCache, recentC *recent_tx.RecentTxCache, heightC *height.HeightCache) http.Handler {
+func BalanceHandlerConstructor(balanceC interfaces.BalanceCache, recentC interfaces.RecentTxCache, heightC interfaces.HeightCache) http.Handler {
 
 	handler := func (writer http.ResponseWriter, request *http.Request) {
 		vars := mux.Vars(request)

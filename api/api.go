@@ -5,16 +5,14 @@ import (
 	"time"
 	"net/http"
 	"crypto/tls"
-	"github.com/secnot/gobalance/balance"
-	"github.com/secnot/gobalance/recent_tx"
-	"github.com/secnot/gobalance/height"
+	"github.com/secnot/gobalance/interfaces"
 )
 
 // Start api starts server and returns http.Server that can be used to stop it with Shutdown
 func StartApi(address string, urlPrefix string, 
-	balanceC  *balance.BalanceCache, 
-	recentTxC *recent_tx.RecentTxCache,
-	heightC   *height.HeightCache) *http.Server {
+	balanceC  interfaces.BalanceCache, 
+	recentTxC interfaces.RecentTxCache,
+	heightC   interfaces.HeightCache) *http.Server {
 
 	router := NewRouter(urlPrefix, balanceC, recentTxC, heightC)
 

@@ -1,7 +1,7 @@
 package recent_tx
 
 import (
-	"github.com/secnot/gobalance/block_manager"
+	"github.com/secnot/gobalance/interfaces"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -25,7 +25,7 @@ type RecentTxCache struct {
 	queue *primitives.BlockQueue
 
 	// block manager
-	manager block_manager.BlockManagerInterface
+	manager interfaces.BlockManager
 	
 	// transaction requests
 	requestChan chan TxRequest
@@ -36,7 +36,7 @@ type RecentTxCache struct {
 
 
 // NewRecentTxCache 
-func NewRecentTxCache(manager block_manager.BlockManagerInterface, trackedBlocks uint16) *RecentTxCache {
+func NewRecentTxCache(manager interfaces.BlockManager, trackedBlocks uint16) *RecentTxCache {
 	cache := &RecentTxCache{
 		requestChan: make(chan TxRequest),
 		stopChan:    make(chan chan bool),
@@ -95,9 +95,9 @@ func (r *RecentTxCache) recentTxRoutine() {
 		case update := <- updatesChan:
 			
 			switch update.Class {
-			case block_manager.OP_NEWBLOCK:
+			case interfaces.OP_NEWBLOCK:
 				r.newBlock(update.Block)
-			case block_manager.OP_BACKTRACK:
+			case interfaces.OP_BACKTRACK:
 				r.backtrackBlock(update.Block)
 			
 			/* TODO: Request transactions from proxy when in commit

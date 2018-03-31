@@ -10,6 +10,7 @@ import (
 	"github.com/secnot/gobalance/primitives"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/secnot/gobalance/crawler"
+	"github.com/secnot/gobalance/interfaces"
 	"github.com/secnot/gobalance/block_manager/storage"
 )
 
@@ -19,9 +20,35 @@ const (
 
 	// Block commit delay
 	DefaultCommitDelay = 30*time.Second
+
+	//
+	BalanceRequestQueueSize = 100
 )
 
 var ErrBacktrackLimit = errors.New("Backtrack limit reached")
+
+
+// BalanceRequest is used to send balance requests to the manager
+// through BalanceChan
+type BalanceRequest struct {
+
+	// Bitcoin address
+	Address string
+	
+	// Channel used to send the response
+	Resp chan BalanceResponse
+}
+
+// Balance request response
+type BalanceResponse struct {
+
+	// Bitcoin address balance or 0 if not found
+	Balance int64
+
+	// Error generated while processing request
+	Err error
+}
+
 
 type BlockManager struct {
 
@@ -60,15 +87,15 @@ type BlockManager struct {
 	commitTimerStartedFlag bool
 	
 	// subscriberts
-	subscribers map[UpdateChan] bool
+	subscribers map[interfaces.UpdateChan] bool
 	
 	// CONTROL CHANNELS
 
 	// New subscription channel
-	SubscribeChan   chan UpdateChan
+	SubscribeChan   chan interfaces.UpdateChan
 
 	// Unsubscribe existing subscription channel
-	UnsubscribeChan chan UpdateChan
+	UnsubscribeChan chan interfaces.UpdateChan
 
 	// Signal crawler to start fetching.
 	StartChan       chan chan bool
@@ -106,11 +133,11 @@ func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.Update
 	b.height       = cache.GetHeight()
 	
 	// Initialize subscribers
-	b.subscribers = make(map[UpdateChan]bool)
+	b.subscribers = make(map[interfaces.UpdateChan]bool)
 
 	// Initialize channels
-	b.SubscribeChan   = make(chan UpdateChan, 10)
-	b.UnsubscribeChan = make(chan UpdateChan)
+	b.SubscribeChan   = make(chan interfaces.UpdateChan, 10)
+	b.UnsubscribeChan = make(chan interfaces.UpdateChan)
 	b.StartChan       = make(chan chan bool)
 	b.StopChan        = make(chan chan bool)
 	b.BalanceChan     = make(chan BalanceRequest, BalanceRequestQueueSize)
@@ -356,25 +383,25 @@ func (b *BlockManager) synced() bool {
 
 
 // processBlockUpdate handles raw block updates from crawler
-func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (BlockUpdate, error){
+func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (interfaces.BlockUpdate, error){
 	
 	switch update.Class {
 	case crawler.OP_NEWBLOCK:
 		block, err := b.addBlock(update.Block, update.Hash)
-		return  NewBlockUpdate(OP_NEWBLOCK, block), err
+		return  interfaces.NewBlockUpdate(interfaces.OP_NEWBLOCK, block), err
 	
 	case crawler.OP_BACKTRACK:
 		block, err := b.backtrackBlock()
-		return NewBlockUpdate(OP_BACKTRACK, block), err
+		return interfaces.NewBlockUpdate(interfaces.OP_BACKTRACK, block), err
 
 	default:
 		err := errors.New("Unknown BlockUpdate Class")
-		return NewBlockUpdate(OP_NEWBLOCK, nil), err
+		return interfaces.NewBlockUpdate(interfaces.OP_NEWBLOCK, nil), err
 	}
 }
 
 // signalSubscribers
-func (b *BlockManager) signalSubscribers(update BlockUpdate) {
+func (b *BlockManager) signalSubscribers(update interfaces.BlockUpdate) {
 	for subscriber, _ := range b.subscribers {
 		subscriber <- update
 	}
@@ -443,7 +470,7 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 					b.startCommitTimer()
 
 					// Signal subscribers a commit is scheduled
-					b.signalSubscribers(NewBlockUpdate(OP_COMMIT, nil))
+					b.signalSubscribers(interfaces.NewBlockUpdate(interfaces.OP_COMMIT, nil))
 				}
 
 			// Commit timer expired
@@ -451,7 +478,7 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 				b.commitTimerStartedFlag = false
 				if b.commitRequired() {
 					b.commit()
-					b.signalSubscribers(NewBlockUpdate(OP_COMMIT_DONE, nil))
+					b.signalSubscribers(interfaces.NewBlockUpdate(interfaces.OP_COMMIT_DONE, nil))
 				}
 
 			// Request balance for one address.
@@ -467,14 +494,14 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 
 
 // Subscribe to crawler helper that returns channel where updates are sent
-func (b *BlockManager) Subscribe(chanSize uint) UpdateChan {
-	ch := make(UpdateChan, int(chanSize))
+func (b *BlockManager) Subscribe(chanSize uint) interfaces.UpdateChan {
+	ch := make(interfaces.UpdateChan, int(chanSize))
 	b.SubscribeChan <- ch
 	return ch
 }
 
 // Unsubscribe from crawler
-func (b *BlockManager) Unsubscribe(ch UpdateChan) {
+func (b *BlockManager) Unsubscribe(ch interfaces.UpdateChan) {
 	b.UnsubscribeChan <- ch
 }
 

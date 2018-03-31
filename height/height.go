@@ -2,14 +2,14 @@ package height
 
 import (
 	"sync"
-	"github.com/secnot/gobalance/block_manager"
+	"github.com/secnot/gobalance/interfaces"
 )
 
 
 
 type HeightCache struct {
 	sync.RWMutex
-	manager block_manager.BlockManagerInterface
+	manager interfaces.BlockManager
 	height uint64
 
 	//
@@ -17,7 +17,7 @@ type HeightCache struct {
 }
 
 // NewHeightCache initializes and starts cache
-func NewHeightCache(manager block_manager.BlockManagerInterface) *HeightCache {
+func NewHeightCache(manager interfaces.BlockManager) *HeightCache {
 	
 	cache := &HeightCache {
 		stopChan: make(chan chan bool),
@@ -40,9 +40,9 @@ func (h *HeightCache) heightRoutine() {
 		case update := <- updateChan:
 			h.Lock()
 			switch update.Class {
-			case block_manager.OP_NEWBLOCK:
+			case interfaces.OP_NEWBLOCK:
 				h.height = update.Block.Height
-			case block_manager.OP_BACKTRACK:
+			case interfaces.OP_BACKTRACK:
 				h.height = update.Block.Height - 1
 			}
 			h.Unlock()

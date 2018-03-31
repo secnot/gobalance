@@ -8,9 +8,7 @@ import (
 	"github.com/secnot/gobalance/logging"
 	"github.com/secnot/gobalance/api/common"
 	
-	"github.com/secnot/gobalance/height"
-	"github.com/secnot/gobalance/balance"
-	"github.com/secnot/gobalance/recent_tx"
+	"github.com/secnot/gobalance/interfaces"
 )
 
 const (
@@ -24,7 +22,7 @@ const (
 	RecentTxPath     = "recent_tx"
 )
 
-type HandlerFuncConstructor func (*balance.BalanceCache, *recent_tx.RecentTxCache, *height.HeightCache) http.Handler
+type HandlerFuncConstructor func (interfaces.BalanceCache, interfaces.RecentTxCache, interfaces.HeightCache) http.Handler
 
 type Route struct {
 	Name        string  // Route name
@@ -82,9 +80,9 @@ func BuildPath(urlPrefix string, path string) string {
 
 // NewRouter
 func NewRouter(urlPrefix string,
-	balanceC  *balance.BalanceCache, 
-	recentTxC *recent_tx.RecentTxCache,
-	heightC   *height.HeightCache) *mux.Router {
+	balanceC  interfaces.BalanceCache, 
+	recentTxC interfaces.RecentTxCache,
+	heightC   interfaces.HeightCache) *mux.Router {
 
     router := mux.NewRouter().StrictSlash(true)
    

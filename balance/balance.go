@@ -8,8 +8,7 @@ import (
 	"net/http"
 	"encoding/json"
 	"io/ioutil"
-	"github.com/secnot/gobalance/block_manager"
-	"github.com/secnot/gobalance/peers"
+	"github.com/secnot/gobalance/interfaces"
 	"github.com/secnot/gobalance/api/common"
 )
 
@@ -28,8 +27,8 @@ type BalanceResponse struct {
 
 // BalanceProxy
 type BalanceCache struct {
-	BlockM    block_manager.BlockManagerInterface
-	PeerM     peers.PeerManagerInterface
+	BlockM    interfaces.BlockManager
+	PeerM     interfaces.PeerManager
 	CacheSize int
 	
 	cache     *Cache
@@ -47,8 +46,8 @@ var proxyClient = &http.Client {
 
 
 // NewBalanceCache initializes a BalanceCache
-func NewBalanceCache(blockM block_manager.BlockManagerInterface, 
-					peerM peers.PeerManagerInterface, cacheSize int) *BalanceCache {
+func NewBalanceCache(blockM interfaces.BlockManager, 
+					peerM interfaces.PeerManager, cacheSize int) *BalanceCache {
 	cache := &BalanceCache {
 		BlockM:    blockM,
 		PeerM :    peerM,
@@ -106,13 +105,13 @@ func (b *BalanceCache) balanceRoutine() {
 		case update := <- updateChan:			
 		
 			switch update.Class {
-			case block_manager.OP_NEWBLOCK:
+			case interfaces.OP_NEWBLOCK:
 				b.cache.NewBlock(update.Block)
-			case block_manager.OP_BACKTRACK:
+			case interfaces.OP_BACKTRACK:
 				b.cache.Backtrack(update.Block)
-			case block_manager.OP_COMMIT:
+			case interfaces.OP_COMMIT:
 				proxyMode = true
-			case block_manager.OP_COMMIT_DONE:
+			case interfaces.OP_COMMIT_DONE:
 				proxyMode = false
 			}
 
@@ -133,7 +132,7 @@ func (b *BalanceCache) balanceRoutine() {
 	}
 }
 
-// Request
+// GetBalance Request address balance
 func (b *BalanceCache) GetBalance(address string, ip net.IP) (balance int64, err error) {	
 	responseCh := make(chan BalanceResponse)
 	b.RequestChan <- BalanceRequest{Address: address, ResponseCh: responseCh, IP: ip}

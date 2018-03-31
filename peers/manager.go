@@ -26,16 +26,6 @@ const (
 	DefaultClientPeerPruneSize = 1000
 )
 
-// Peer Manager interface only purpose is testing
-type PeerManagerInterface interface {
-	Start() error
-	Stop()
-	MarkPeerUnreachable(peer string)
-	GetPeer()(string, error)
-	GetPeerPersistent(id string)(string, error)
-}
-
-
 type PeerManager struct {
 	
 	sync.RWMutex

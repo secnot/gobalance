@@ -3,7 +3,7 @@ package balance
 
 import (
 	"github.com/secnot/simplelru"
-	"github.com/secnot/gobalance/block_manager"
+	"github.com/secnot/gobalance/interfaces"
 	"github.com/secnot/gobalance/primitives"
 )
 
@@ -12,12 +12,12 @@ import (
 
 type Cache struct {
 	size int
-	manager block_manager.BlockManagerInterface
+	manager interfaces.BlockManager
 	cache *simplelru.LRUCache
 }
 
 //
-func NewCache(size int, manager block_manager.BlockManagerInterface) *Cache {
+func NewCache(size int, manager interfaces.BlockManager) *Cache {
 	return &Cache{
 		size:    size,
 		manager: manager,
