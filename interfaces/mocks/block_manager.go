@@ -1,7 +1,6 @@
 package mocks
 
 import (
-	"fmt"
 	"sync"
 	"github.com/secnot/gobalance/interfaces"
 )
