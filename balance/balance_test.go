@@ -10,6 +10,7 @@ import (
 	"github.com/secnot/gobalance/api"
 	"github.com/secnot/gobalance/primitives"
 	"github.com/secnot/gobalance/interfaces"
+	"github.com/secnot/gobalance/interfaces/mocks"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
@@ -87,8 +88,8 @@ func TestBalance(t *testing.T) {
 		"address2": 50 ,
 	}
 
-	blockM := NewBlockMock(balance, 1000, true)
-	peerM  := NewPeerMock("localhost:9090")
+	blockM := mocks.NewBlockMock(balance, 1000, true)
+	peerM  := mocks.NewPeerMock("localhost:9090")
 	cache_size := 10
 	balanceCache := NewBalanceCache(blockM, peerM, cache_size)
 
@@ -110,6 +111,11 @@ func TestBalance(t *testing.T) {
 	expected := map[string]int64{"address1": 1, "address2": 51, "address3": 0}
 	time.Sleep(100*time.Millisecond)
 	BalanceIsEqual(t, balanceCache, localhost, expected)
+
+	// Cleanup
+	blockM.Stop()
+	peerM.Stop()
+	balanceCache.Stop()
 }
 
 
@@ -128,8 +134,8 @@ func TestRemoteBalance(t *testing.T) {
 	cache_size := 10
 	localhost := net.ParseIP("127.0.0.1")
 
-	remoteBlockM    := NewBlockMock(remoteBalance, remoteHeight, true)
-	remotePeerM     := NewPeerMock("localhost:9090")
+	remoteBlockM    := mocks.NewBlockMock(remoteBalance, remoteHeight, true)
+	remotePeerM     := mocks.NewPeerMock("localhost:9090")
 	remoteHeightM   := height.NewHeightCache(remoteBlockM)
 	remoteRecentTxM := recent_tx.NewRecentTxCache(remoteBlockM, 10)	
 	remoteBalanceCache := NewBalanceCache(remoteBlockM, remotePeerM, cache_size)
@@ -145,8 +151,8 @@ func TestRemoteBalance(t *testing.T) {
 	}
 	localHeight := int64(1000)
 
-	localBlockM  := NewBlockMock(localBalance, localHeight, true)
-	localPeerM   := NewPeerMock("127.0.0.1:9999")
+	localBlockM  := mocks.NewBlockMock(localBalance, localHeight, true)
+	localPeerM   := mocks.NewPeerMock("127.0.0.1:9999")
 	localBalanceCache := NewBalanceCache(localBlockM, localPeerM, cache_size)
 
 
