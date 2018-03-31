@@ -129,6 +129,13 @@ func (p *PeerMock) MarkPeerUnreachable(peer string) {
 	return
 }
 
+// SetPeer change returned peer address
+func (p *PeerMock) SetPeer(peerAddress string) {
+	p.Lock()
+	defer p.Unlock()
+	p.Address = peerAddress
+}
+
 // GetPeer returns peer address
 func (p *PeerMock) GetPeer()(string, error) {
 	p.RLock()

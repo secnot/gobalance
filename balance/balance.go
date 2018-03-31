@@ -12,6 +12,12 @@ import (
 	"github.com/secnot/gobalance/api/common"
 )
 
+// Error returned when remote peer balance request failed
+type ConnectionError struct {
+	msg string // error description
+	StatusCode int 
+}
+func (e ConnectionError) Error() string {return e.msg}
 
 type BalanceRequest struct {
 	Address    string
@@ -71,14 +77,27 @@ func (b *BalanceCache) start(){
 func (b *BalanceCache) requestProxyBalance(request BalanceRequest) {
 
 	remotePeer, err := b.PeerM.GetPeerPersistent(request.IP.String())
-	url := fmt.Sprintf("http://%s/%s", remotePeer, api_common.BalancePath)
+	url := fmt.Sprintf("http://%s/%s/%s", remotePeer, api_common.BalancePath, request.Address)
 	resp, err := proxyClient.Get(url)
 	if err != nil {
+		b.PeerM.MarkPeerUnreachable(remotePeer)
 		request.ResponseCh <- BalanceResponse{balance: -1, err: err}
 		return
 	}
 	defer resp.Body.Close()
 
+	// Check valid response status code
+	if resp.StatusCode != http.StatusOK {
+		err := ConnectionError{
+			msg: fmt.Sprintf("Connection error while requesting balance from %v", url),
+			StatusCode: resp.StatusCode,
+		}
+
+		request.ResponseCh <- BalanceResponse{balance: -1, err: err}
+		return
+	}
+	
+	// Decode response
 	var address api_common.Address
 	err = json.NewDecoder(resp.Body).Decode(&address)
 	if err != nil {
@@ -124,11 +143,9 @@ func (b *BalanceCache) balanceRoutine() {
 			}
 	
 		case ch := <- b.StopChan:
-			// TODO: Close all pending requests, and channels????
 			ch <- true
 			return
 		}
-		
 	}
 }
 

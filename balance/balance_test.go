@@ -134,7 +134,7 @@ func TestRemoteBalance(t *testing.T) {
 	remoteRecentTxM := recent_tx.NewRecentTxCache(remoteBlockM, 10)	
 	remoteBalanceCache := NewBalanceCache(remoteBlockM, remotePeerM, cache_size)
 
-	api.StartApi("127.0.0.1:9999", "/", remoteBalanceCache, remoteRecentTxM, remoteHeightM)
+	remoteServer := api.StartApi("127.0.0.1:9999", "/", remoteBalanceCache, remoteRecentTxM, remoteHeightM)
 	
 
 	// Start local peer
@@ -160,6 +160,14 @@ func TestRemoteBalance(t *testing.T) {
 	time.Sleep(500*time.Millisecond)
 	BalanceIsEqual(t, localBalanceCache, localhost, remoteBalance) 
 
+	// Check balance unavailable remote peer
+	localPeerM.SetPeer("127.0.0.1:55555")
+	time.Sleep(100*time.Millisecond)	
+	bal, err := localBalanceCache.GetBalance("address1", localhost)
+	if err == nil {
+		t.Errorf("GetBalance(): Expecting error while requesting from unavailable peer, returned %v", bal)
+		return
+	}
 
 	// Check balance after commit	
 	update = interfaces.NewBlockUpdate(interfaces.OP_COMMIT_DONE, nil)
@@ -167,13 +175,18 @@ func TestRemoteBalance(t *testing.T) {
 	time.Sleep(500*time.Millisecond)
 	BalanceIsEqual(t, localBalanceCache, localhost, localBalance) 
 
-	// TODO: Shutdown api and services
 	//remoteServer.Shutdown()
 	remoteBlockM.Stop()
 	remotePeerM.Stop()
 	remoteHeightM.Stop()
 	remoteRecentTxM.Stop()
 	remoteBalanceCache.Stop()
+	remoteServer.Stop()
 
-	t.Errorf("nooooooo")
+	localPeerM.Stop()
+	localBlockM.Stop()
+	localBalanceCache.Stop()
+	
+	// Wait all is closed
+	time.Sleep(time.Second)
 }
