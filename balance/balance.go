@@ -112,9 +112,7 @@ func (b *BalanceCache) requestProxyBalance(request BalanceRequest) {
 // balanceRoutine handles all incoming requests
 func (b *BalanceCache) balanceRoutine() {
 
-	b.Lock()
 	updateChan := b.BlockM.Subscribe(10)
-	b.Unlock()
 
 	// When the block manager is commiting a block the balance is proxied from another
 	// 
