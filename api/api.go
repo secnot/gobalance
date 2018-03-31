@@ -8,11 +8,22 @@ import (
 	"github.com/secnot/gobalance/interfaces"
 )
 
+
+type ApiServer struct {
+	server *http.Server
+}
+
+func (s *ApiServer) Stop () error{
+	return s.server.Shutdown(nil)
+}
+
+
+
 // Start api starts server and returns http.Server that can be used to stop it with Shutdown
 func StartApi(address string, urlPrefix string, 
 	balanceC  interfaces.BalanceCache, 
 	recentTxC interfaces.RecentTxCache,
-	heightC   interfaces.HeightCache) *http.Server {
+	heightC   interfaces.HeightCache) *ApiServer {
 
 	router := NewRouter(urlPrefix, balanceC, recentTxC, heightC)
 
@@ -34,5 +45,5 @@ func StartApi(address string, urlPrefix string,
 		}
 	}()
 
-	return srv
+	return &ApiServer{server: srv}
 }
