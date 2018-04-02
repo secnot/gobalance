@@ -48,3 +48,32 @@ Configuration file format is toml
 **pass (string)**; Bitcoind service password
 
 **chain (string)**: Chain selection "mainnet" or "testnet3" (default: "mainnet")
+
+
+## Environment variables
+
+All the configuration options can also be set using environment vars, the values provided
+this way will shadow the values in the configuration file. The env options name are:
+
+
+- **GOBALANCE_SYNC**
+- **GOBALANCE_MODE**
+- **GOBALANCE_WORKDIR**
+- **GOBALANCE_UTXO_CACHE_SIZE**
+- **GOBALANCE_BALANCE_CACHE_SIZE**
+- **GOBALANCE_RECENT_BLOCKS**
+
+- **GOBALANCE_PEERS_PORT**
+- **GOBALANCE_PEERS_ALLOW_LOCAL_IPS**
+- **GOBALANCE_PEERS_UNREACHABLE_MARKS**
+- **GOBALANCE_PEERS_UNREACHABLE_PERIOD**
+- **GOBALANCE_PEERS_SEEDS**
+
+- **GOBALANCE_API_URL_PREFIX**
+- **GOBALANCE_API_PORT**
+- **GOBALANCE_API_BIND**
+
+- **GOBALANCE_BITCOIND_HOST**
+- **GOBALANCE_BITCOIND_USER**
+- **GOBALANCE_BITCOIND_PASS**
+- **GOBALANCE_BITCOIND_CHAIN**

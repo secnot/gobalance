@@ -4,7 +4,9 @@ import(
 	"testing"
 	"runtime"
 	"path/filepath"
+	"strings"
 	"fmt"
+	"os"
 )
 
 const (
@@ -80,14 +82,14 @@ func TestValidConfigFile(t *testing.T) {
 	}
 
 	// Test peers seeds
-	seeds := data["peers.seeds"].([]interface{})
+	seeds := data["peers.seeds"].([]string)
 	if len(seeds) != 2 {
 		t.Errorf("peers.seeds: Expection two seed string returned %v", len(seeds))
 	}
 
 	seedsMap := make(map[string]bool)
 	for _, seed := range seeds {
-		seedsMap[seed.(string)] = true
+		seedsMap[seed] = true
 	}
 
 	if _, ok := seedsMap["seed1.unknown.com"]; !ok {
@@ -171,7 +173,7 @@ func TestDefaultValuesConfigFile(t *testing.T) {
 	if data["peers.unreachable_period"].(int64) != DefaultPeersUnreachablePeriod {
 		t.Errorf("peers.unreachable_period: Unexpected default value")
 	}
-	if len(data["peers.seeds"].([]interface{})) != 0 {
+	if len(data["peers.seeds"].([]string)) != 0 {
 		t.Errorf("peers.seeds: Unexpected default value")
 	}
 
@@ -199,17 +201,42 @@ func TestUnknownOptionsConfigFile(t *testing.T) {
 	}
 }
 
-// Test ReadConfig returns an error 
-func TestInvalidTypeOptionsConfigFile(t *testing.T) {
+// Test environment options
+func TestEnvOptions(t *testing.T) {
 	
-	_, err := ReadConfig(GetTestDataPath(), "type_string_conf")
-	if err == nil {
-		t.Errorf("ReadConfig(): Should have returned an error")
+	utxo_cache_size := fmt.Sprintf("%v_utxo_cache_size",EnvOptionsPrefix)
+	os.Setenv(strings.ToUpper(utxo_cache_size), "5555")
+	
+	// test environment options shadow default values
+	data, err := ReadConfig(GetTestDataPath(), "default_conf")
+	if err != nil {
+		t.Error(err)
+		return
 	}
 
-	_, err = ReadConfig(GetTestDataPath(), "type_int_conf")
-	if err == nil {
-		t.Errorf("ReadConfig(): Should have returned an error")
+	if data["utxo_cache_size"].(int64) != 5555 {
+		t.Errorf("utxo_cache_size: Didn't read environment value %v", data["utxo_cache_size"])
+	}
+
+	// Test environment options shandow config file values
+	data, err = ReadConfig(GetTestDataPath(), "valid_conf")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	if data["utxo_cache_size"].(int64) != 5555 {
+		t.Errorf("utxo_cache_size: Environment var didn't shadow config file option\n")
+		return
+	}
+
+	// Test option names with dots
+	bitcoind_pass := strings.ToUpper(fmt.Sprintf("%v_bitcoind_pass", EnvOptionsPrefix))
+	os.Setenv(bitcoind_pass, "secret_pass")
+	data, err = ReadConfig(GetTestDataPath(), "valid_conf")
+
+	if data["bitcoind.pass"].(string) != "secret_pass" {
+		t.Errorf("bitcoind.pass: Environment var %v didn't set value %v\n", bitcoind_pass, data["bitcoind.pass"])
+		return
 	}
 }
-

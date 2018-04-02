@@ -25,7 +25,7 @@ func KindValidator(kind reflect.Kind) ValidatorFunc {
 	
 	validator := func(val interface{}) error {
 		if reflect.TypeOf(val).Kind() != kind {
-			msg := fmt.Sprintf("%v type is not %v", val, kind)
+			msg := fmt.Sprintf("%v (%v) type is not %v", val, reflect.TypeOf(val).Kind(), kind)
 			return ValidationError{msg:msg, value: val}
 		}
 		return nil
@@ -51,6 +51,11 @@ func SliceOfValidator(kind reflect.Kind) ValidatorFunc {
 	}
 
 	return ChainValidator(KindValidator(reflect.Slice), validator)
+}
+
+// StringSliceValidator
+func StringSliceValidator() ValidatorFunc {
+	return SliceOfValidator(reflect.String)
 }
 
 // SliceElemeValidator applies a validator function to all the elements of an slice

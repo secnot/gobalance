@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/spf13/viper"
+	"strings"
 	"fmt"
 )
 
@@ -10,6 +11,7 @@ const (
 	// Configuration file default path
 	DefaultConfigPath     = "$HOME/.gobalance/"
 	DefaultConfigFilename = "conf"
+	EnvOptionsPrefix      = "gobalance"
 )
 
 
@@ -31,7 +33,7 @@ func ParseConfig(vip *viper.Viper) (map[string]interface{}, error){
 
 	conf := make(map[string]interface{})
 	
-	// Load options into a map of supportedOptions
+	// Load options into a map for fast lookup
 	supportedOptions := make(map[string]Option)
 	for _, op := range Options {
 		supportedOptions[op.name] = op
@@ -46,11 +48,11 @@ func ParseConfig(vip *viper.Viper) (map[string]interface{}, error){
 		}
 	}
 
-	// Check options type
-
+	// Validate options
 	for _, op := range Options {
-		value := vip.Get(op.name)
-		
+		//value := vip.Get(op.name)
+		value := op.cast(vip, op.name)
+
 		// Validate value
 		if err := op.val(value); err != nil {
 			msg := fmt.Sprintf("Config Error: %v -> %v", op.name, err.Error())
@@ -70,6 +72,14 @@ func InitOptions(vip *viper.Viper) error {
 		vip.SetDefault(op.name, op.def) 
 	}
 
+	// Add supported environment options
+	vip.SetEnvPrefix(EnvOptionsPrefix)  // Add prefix
+	replacer := strings.NewReplacer(".", "_")
+	vip.SetEnvKeyReplacer(replacer)     // Change dots to underscores
+	for _, op := range Options {
+		vip.BindEnv(op.name)
+	}
+
 	return nil
 }
 
@@ -79,7 +89,7 @@ func ReadConfig(filepath string, filename string) (conf map[string]interface{}, 
 	v := viper.New()
 
 	v.SetConfigType("toml")
-
+	
 	// Initialize 
 	if err = InitOptions(v); err != nil {
 		return nil, err
