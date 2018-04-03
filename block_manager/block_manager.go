@@ -378,7 +378,7 @@ func (b *BlockManager) getBalance(address string) (int64, error) {
 
 // Synced returns true when the manager is with the last blockchain block
 func (b *BlockManager) synced() bool {
-	return b.timeSinceLastBlock() > 30.0
+	return b.timeSinceLastBlock() > 10.0
 }
 
 
@@ -402,6 +402,12 @@ func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (interface
 
 // signalSubscribers
 func (b *BlockManager) signalSubscribers(update interfaces.BlockUpdate) {
+
+	// Only signal subscribers while not in sync mode
+	if b.Sync {
+		return
+	}
+
 	for subscriber, _ := range b.subscribers {
 		subscriber <- update
 	}
@@ -462,6 +468,7 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 					log.Panic(err)
 					return
 				}
+
 				b.signalSubscribers(blockUpdate)
 
 				if b.commitRequired() && !b.commitTimerStartedFlag {
