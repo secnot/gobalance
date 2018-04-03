@@ -124,9 +124,9 @@ func main() {
 
 	// Configure Peermanager
 	////////////////////////
-	peerSeeds := make([]string, len(conf["peers.seeds"].([]interface{})))
-	for i, peer := range conf["peers.seeds"].([]interface{}) {
-		peerSeeds[i] = peer.(string)
+	peerSeeds := make([]string, len(conf["peers.seeds"].([]string)))
+	for i, peer := range conf["peers.seeds"].([]string) {
+		peerSeeds[i] = peer
 	}
 	
 	peerM := &peers.PeerManager {
