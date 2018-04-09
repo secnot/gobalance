@@ -13,9 +13,6 @@ import (
 
 
 const (
-	// Max Buffered blocks
-	FetcherBlockBufferSize = 50	
-	
 	// Max number of blocks 
 	BlockQueueSize = 500
 )
@@ -51,11 +48,8 @@ type UpdateChan chan BlockUpdate
 
 
 type Crawler struct {
-	// Channel to signal fetcher routine to stop
-	fetcherStop chan bool
-
-	// Channel for the reception of fetcher blocks
-	fetcherBlocks chan blockRecord
+	// Block fetcher routine
+	fetcher *Fetcher
 
 	// Block updates subscribers 
 	subscribers map[UpdateChan]bool
@@ -92,8 +86,7 @@ func NewCrawler(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash c
 
 
 	craw := &Crawler{
-		fetcherStop:   nil,
-		fetcherBlocks: nil,
+		fetcher: nil,
 		rpcConfig:     config,
 		height:        startHeight,
 		subscribers:   make(map [UpdateChan]bool),
@@ -119,7 +112,7 @@ func (c *Crawler) backtrackBlock() chainhash.Hash {
 	}
 
 	c.height -= 1
-	c.newFetcher(c.height) // Fetch previous block again
+	c.newFetcher() // Fetch previous block again
 	return c.blockQueue.PopBack().(chainhash.Hash)
 }
 
@@ -140,7 +133,7 @@ func (c *Crawler) processBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) 
 	verifiedHash := block.BlockHash()
 	if verifiedHash != *blockHash {
 		log.Print("Crawler: Invalid hash ", *blockHash, verifiedHash)
-		c.newFetcher(c.height+1) // Fetch same block again
+		c.newFetcher() // Fetch same block again
 	}
 
 	if block.Header.PrevBlock != c.blockQueue.Back().(chainhash.Hash) {
@@ -158,23 +151,28 @@ func (c *Crawler) processBlock(block *wire.MsgBlock, blockHash *chainhash.Hash) 
 
 // newFetcher stops current fetcher routine and creates a new one starting at a
 // given height
-func (c *Crawler) newFetcher(height uint64) {
+func (c *Crawler) newFetcher() {
 	
 	// Stop previous fetcher
-	if c.fetcherStop != nil {
-		c.fetcherStop <- true
+	if c.fetcher != nil {
+		c.fetcher.Stop()
+		c.fetcher = nil
 	}
 	
 	// Both channels to be closed by fetcher task
-	c.fetcherStop   = make(chan bool)
-	c.fetcherBlocks = make(chan blockRecord, FetcherBlockBufferSize)
+	config := make([]rpcclient.ConnConfig, 0)
+	config = append(config, c.rpcConfig)
 
-	//
-	go fetcher(c.rpcConfig, height, c.fetcherBlocks, c.fetcherStop)
+	fetcher, err := NewFetcher(config, c.height)
+	if err != nil {
+		log.Print(err)
+	}
+	c.fetcher = fetcher
 }
 
 // notifySubscribers sends a block update to all the subscribers
 func (c *Crawler) notifySubscribers(update BlockUpdate) {
+
 	for subscriber, _ := range c.subscribers {
 		subscriber <- update
 	}
@@ -190,12 +188,28 @@ func (c *Crawler) delSubscriber(subscriber UpdateChan) {
 	delete(c.subscribers, subscriber)
 }
 
+// stop crawler and release resources
+func (c *Crawler) stop() {
+	if c.fetcher != nil {
+		c.fetcher.Stop()
+	}
+
+	// TODO: signal subscribers and close all channels
+}
+
 // Crawler routine
 func (c *Crawler) crawlerRoutine() {
 
 	// Accept subscriptions and wait until the start signal is received
 	// Fetch blocks until the stop signal is received
+	var recordChan chan blockRecord
 	for {
+
+		if c.fetcher != nil {
+			recordChan = c.fetcher.UpdatesChan
+		} else {
+			recordChan = nil
+		}
 		select {		
 			// Subscription request
 			case subscriber := <-c.subscribeChan:
@@ -207,19 +221,20 @@ func (c *Crawler) crawlerRoutine() {
 
 			// Start crawler
 			case ch := <-c.startChan:
-				if c.fetcherBlocks == nil {
-					c.newFetcher(c.height) // Fetch next block
+				if c.fetcher == nil {
+					c.newFetcher()
 				}
 				ch <- true // Signal started
 
 			// Stop crawler and exit
 			case ch := <-c.stopChan:
-				// TODO: Force commit to db, close fetcher, close channels, etc...
+				// close fetcher, close channels, etc...
+				c.stop()
 				ch <- true	// signal stopped
 				break
 
 			// New block available
-			case record := <-c.fetcherBlocks:
+			case record := <-recordChan:
 				c.processBlock(record.Block, record.BlockHash)
 		}
 	}
