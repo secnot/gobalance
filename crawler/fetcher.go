@@ -114,6 +114,7 @@ func NewFetcher(servers []rpcclient.ConnConfig, height uint64) (*Fetcher, error)
 // Stop fetcher and wait for confirmation message
 func (f *Fetcher) Stop() {
 	confirmationCh := make(chan bool)
+	defer close(confirmationCh)
 	f.stopChan <- confirmationCh
 	<-confirmationCh
 }

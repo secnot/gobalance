@@ -261,6 +261,7 @@ func (c *Crawler) Unsubscribe(ch UpdateChan) {
 // Start starts crawler crawling :), 
 func (c *Crawler) Start() {
 	confirmationChan := make(chan bool)
+	defer close(confirmationChan)
 	c.startChan <- confirmationChan
 
 	// Wait until it has started
@@ -270,6 +271,7 @@ func (c *Crawler) Start() {
 // Stop crawler blocks until successfull exit
 func (c *Crawler) Stop() {	
 	confirmationChan := make(chan bool)
+	defer close(confirmationChan)
 	c.stopChan <- confirmationChan
 
 	// Wait until it has stopped
@@ -279,6 +281,7 @@ func (c *Crawler) Stop() {
 // TopHeight returns the height of the block at the top of the blockchain
 func (c *Crawler) TopHeight() uint64 {
 	responseChan := make(chan uint64)
+	defer close(responseChan)
 	c.heightChan <- responseChan
 
 	return <-responseChan
