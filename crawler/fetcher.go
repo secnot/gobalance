@@ -67,6 +67,7 @@ type Fetcher struct {
 // NewFetcher
 func NewFetcher(servers []rpcclient.ConnConfig, height uint64) (*Fetcher, error) {
 
+	// copy original server config
 	config := make([]rpcclient.ConnConfig, len(servers))
 	copy(config, servers)
 
@@ -151,19 +152,58 @@ func (f *Fetcher) cleanUp(confirmationCh chan bool) {
 	confirmationCh <- true
 }
 
+// Try to retrieve next block from 
+func (f *Fetcher) getNextBlock() (record blockRecord, ok bool) {
+
+		// If the top of the blockchain has been reached check if there
+		// are new blocks.
+		if f.topHeight < f.height {
+			blockCount, err := f.currentClient.GetBlockCount()
+			if err != nil || uint64(blockCount) <= f.topHeight {
+				f.nextClient()
+				return blockRecord{}, false
+			}
+			
+			// Lock because it can be accessed directly
+			f.Lock()
+			f.topHeight = uint64(blockCount)
+			f.Unlock()
+		}
+
+		// Read next block	
+		blockHash, err := f.currentClient.GetBlockHash(int64(f.height))
+		if err != nil {
+			log.Print("Fetcher: GetBlockHash: ", err)
+			f.nextClient()
+			return blockRecord{}, false
+		}
+
+		block, err := f.currentClient.GetBlock(blockHash)
+		if err != nil {
+			log.Print("Fetcher: GetBlock ", err)
+			f.nextClient()
+			return blockRecord{}, false
+		}
+	
+		// Block ready
+		f.height += 1
+		record = blockRecord{
+			BlockHash: blockHash, 
+			Height: f.height, 
+			Block: block,
+		}
+		return record, true
+}
+
 // fetcherRoutine handles bitcoind requests
 func (f *Fetcher) fetcherRoutine() {
-
-	var err error
-	
 	// Main fetching loop
-	retries := 0           // failed requests retries
+	retry := false        // failed requests retries
 
 	for {
 
-		// If there was a connection failure wait until next try
-		// unless there is a stop signal
-		if retries > 0 {
+		// If the previous block request wasn't successful, wait retry delay  
+		if retry {
 			retryTimer := time.NewTimer(RPCRetryDelay*time.Millisecond)
 			select {
 
@@ -178,51 +218,17 @@ func (f *Fetcher) fetcherRoutine() {
 				return
 			}
 
-			// If the retry was because of an error try with another client next time
-			if err != nil {
-				f.nextClient()
-				err = nil
-			}
+			retry = false
 		}
 
-		// If the top of the blockchain has been reached wait until there
-		// is a new block available.
-		if f.topHeight < f.height {
-			blockCount, err := f.currentClient.GetBlockCount()
-			if err != nil || uint64(blockCount) <= f.topHeight {
-				retries++
-				continue // Wait and retry
-			}
-			
-			f.Lock()
-			f.topHeight = uint64(blockCount)
-			f.Unlock()
-
-			retries = 0
+		// Get the block
+		record, ok := f.getNextBlock()
+		if !ok {
+			retry = true
+			continue
 		}
 
-		// Read next block	
-		blockHash, err := f.currentClient.GetBlockHash(int64(f.height))
-		if err != nil {
-			log.Print("Fetcher: GetBlockHash: ", err)
-			retries++
-			continue // Wait and retry
-		}
-
-		block, err := f.currentClient.GetBlock(blockHash)
-		if err != nil {
-			log.Print("Fetcher: GetBlock ", err)
-			retries++
-			continue // Wait and retry
-		}
-	
-		// Add the block to the buffer while waitting for a stop signal
-		record := blockRecord{
-			BlockHash: blockHash, 
-			Height: f.height, 
-			Block: block,
-		}
-
+		// Send block 
 		select {
 		case confirmationChan := <- f.stopChan:
 			f.cleanUp(confirmationChan)
@@ -230,8 +236,7 @@ func (f *Fetcher) fetcherRoutine() {
 		
 		case f.UpdatesChan <- record:
 			// Ready for next block
-			retries = 0
-			f.height += 1
+			retry = false
 		}
 	}
 }

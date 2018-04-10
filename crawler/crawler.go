@@ -58,7 +58,7 @@ type Crawler struct {
 	height uint64
 
 	// Configuration for bitcoind RPC server
-	rpcConfig rpcclient.ConnConfig
+	rpcConfig []rpcclient.ConnConfig
 
 	// Hashes for the last n unconfirmed blocks
 	blockQueue *queue.Queue
@@ -76,10 +76,14 @@ type Crawler struct {
 
 	// Signal crawler to stop fetching and exit.
 	stopChan        chan chan bool
+
+	// Request for the height of the blockchain
+	heightChan		chan chan uint64
 }
 
-// NewCrawler creates a new crawler
-func NewCrawler(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) (*Crawler, error) {
+// NewCrawler creates a new crawler, that starts fetching blocks at the given height.
+// prevBlockHash is the hash of the block preceding the one where fetching starts
+func NewCrawler(config []rpcclient.ConnConfig, startHeight uint64, prevBlockHash chainhash.Hash) (*Crawler, error) {
 
 	blockQueue := queue.New()
 	blockQueue.PushBack(prevBlockHash)
@@ -97,6 +101,7 @@ func NewCrawler(config rpcclient.ConnConfig, startHeight uint64, prevBlockHash c
 		unsubscribeChan: make(chan UpdateChan),
 		startChan:       make(chan chan bool),
 		stopChan:        make(chan chan bool),
+		heightChan:      make(chan chan uint64),
 	}
 
 	go craw.crawlerRoutine()
@@ -160,10 +165,7 @@ func (c *Crawler) newFetcher() {
 	}
 	
 	// Both channels to be closed by fetcher task
-	config := make([]rpcclient.ConnConfig, 0)
-	config = append(config, c.rpcConfig)
-
-	fetcher, err := NewFetcher(config, c.height)
+	fetcher, err := NewFetcher(c.rpcConfig, c.height)
 	if err != nil {
 		log.Print(err)
 	}
@@ -236,6 +238,10 @@ func (c *Crawler) crawlerRoutine() {
 			// New block available
 			case record := <-recordChan:
 				c.processBlock(record.Block, record.BlockHash)
+		
+			// top height requests
+			case ch := <- c.heightChan:
+				ch <- c.fetcher.TopHeight()
 		}
 	}
 }
@@ -254,18 +260,26 @@ func (c *Crawler) Unsubscribe(ch UpdateChan) {
 
 // Start starts crawler crawling :), 
 func (c *Crawler) Start() {
-	ch := make(chan bool)
-	c.startChan <- ch
+	confirmationChan := make(chan bool)
+	c.startChan <- confirmationChan
 
 	// Wait until it has started
-	<- ch
+	<- confirmationChan
 }
 
 // Stop crawler blocks until successfull exit
 func (c *Crawler) Stop() {	
-	ch := make(chan bool)
-	c.stopChan <- ch
+	confirmationChan := make(chan bool)
+	c.stopChan <- confirmationChan
 
 	// Wait until it has stopped
-	<- ch
+	<- confirmationChan
+}
+
+// TopHeight returns the height of the block at the top of the blockchain
+func (c *Crawler) TopHeight() uint64 {
+	responseChan := make(chan uint64)
+	c.heightChan <- responseChan
+
+	return <-responseChan
 }
