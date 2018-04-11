@@ -59,14 +59,22 @@ func main() {
 		log.Panic(err)
 	}
 
-	// Connect to local bitcoin core RPC server using HTTP POST mode.
-	rpcConf := rpcclient.ConnConfig{
-		Host:         conf["bitcoind.host"].(string),
-		User:         conf["bitcoind.user"].(string),
-		Pass:         conf["bitcoind.pass"].(string),
-		DisableAutoReconnect: false,
-		HTTPPostMode: true, // Bitcoin core only supports HTTP POST mode
-		DisableTLS:   true, // Bitcoin core does not provide TLS by default
+	// Build rpcclient configuration using bitcoin core RPC server using HTTP POST mode.
+	bitcoindHosts := make([]string, 0)
+	bitcoindHosts = append(bitcoindHosts, conf["bitcoind.host"].(string)) // TODO: Use this until config accept  slice of bitcoind hosts
+	
+	rpcConf := make([]rpcclient.ConnConfig, 0)
+	for _, host := range bitcoindHosts {
+		conf := rpcclient.ConnConfig{
+			Host:         host,
+			User:         conf["bitcoind.user"].(string),
+			Pass:         conf["bitcoind.pass"].(string),
+			DisableAutoReconnect: false,
+			HTTPPostMode: true, // Bitcoin core only supports HTTP POST mode
+			DisableTLS:   true, // Bitcoin core does not provide TLS by default
+		}
+
+		rpcConf = append(rpcConf, conf)
 	}
 
 	// Configure bitcoind server parameters
@@ -105,8 +113,6 @@ func main() {
 
 	// Launch Block Manager
 	/////////////////////////
-	updateChan := crawlerM.Subscribe(10)
-
 	rand.Seed(time.Now().UnixNano())
 	blockM :=  &block_manager.BlockManager {
 		Sync:           conf["sync"].(bool),
@@ -119,7 +125,7 @@ func main() {
 		// from 0 to 119 seconds delay from the moment a commit is required and when it starts
 		CommitDelay:     time.Duration(rand.Intn(120))*time.Second,
 	}
-	blockM.Start(utxoStorage, updateChan)
+	blockM.Start(utxoStorage, crawlerM)
 	
 
 	// Configure Peermanager
