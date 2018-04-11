@@ -19,10 +19,13 @@ const (
 	AverageBlockInputs = 2048 * 10 // Transactions * Inputs
 
 	// Block commit delay
-	DefaultCommitDelay = 30*time.Second
+	DefaultCommitDelay = 10*time.Second
 
 	//
 	BalanceRequestQueueSize = 100
+
+	// Size of channel for crawler updates
+	CrawlerUpdateChanSize = 50
 )
 
 var ErrBacktrackLimit = errors.New("Backtrack limit reached")
@@ -76,8 +79,17 @@ type BlockManager struct {
 	// Last time a block was added 
 	lastTime time.Time
 
+	// Last 
+	topHeight uint64
+
 	// 
 	storageCache *storage.StorageCache
+
+	// 
+	crawler *crawler.Crawler
+
+	// Channel for receiving crawler updates
+	crawlerUpdateChan crawler.UpdateChan
 
 	// Blocks waiting for enough confirmations before committing to storage
 	pendingBlocks *primitives.BlockQueue
@@ -114,12 +126,15 @@ type BlockManager struct {
 }
 
 // Start initializes and launches BlockManager routines
-func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.UpdateChan) error {
+func (b *BlockManager) Start(sto storage.Storage, crawlerM *crawler.Crawler) error {
 
 	cache, err := storage.NewStorageCache(sto, !b.Sync)
 	if err != nil {
 		return err
 	}
+
+	b.crawler = crawlerM
+	b.crawlerUpdateChan = crawlerM.Subscribe(CrawlerUpdateChanSize)
 
 	if b.CommitMinBlocks < 1 {
 		b.CommitMinBlocks = 1
@@ -153,7 +168,7 @@ func (b *BlockManager) Start(sto storage.Storage, blockUpdateChan crawler.Update
 	b.pendingBlocks = primitives.NewBlockQueue()
 
 	// Launch main routine
-	go b.managerRoutine(blockUpdateChan)
+	go b.managerRoutine()
 	
 	return nil
 }
@@ -298,8 +313,6 @@ func (b *BlockManager) addBlock(block *wire.MsgBlock, blockHash *chainhash.Hash)
 		b.storageCache.AddBlock(confirmedBlock)
 	}
 
-	b.lastTime = time.Now()
-
 	return pBlock, nil
 }
 
@@ -320,9 +333,28 @@ func  (b *BlockManager) uncommittedBlocks() int {
 	return b.storageCache.UncommittedBlocks()
 }
 
+
+// topReached returns true if the last block is the top of the blockchain
+func (b *BlockManager) topReached() bool {
+
+	// Check against the stored top
+	if uint64(b.height) < b.topHeight {
+		return false
+	}
+
+	// Check against the current blockchain top
+	b.topHeight = b.crawler.TopHeight()
+	return uint64(b.height) >= b.topHeight
+}
+
 // CommitRequired returns true if it's time for a commit
 func (b *BlockManager)commitRequired() bool {
 	
+	// Commit already scheduled
+	if b.commitTimerStartedFlag {
+		return false
+	}
+
 	// Check there is something to commit
 	if b.uncommittedBlocks() < 1 {
 		return false
@@ -334,13 +366,9 @@ func (b *BlockManager)commitRequired() bool {
 	}
 
 	// Sync mode: we need to commit the last blocks as soon as the top of the 
-	// chain is reached, so if too much time has passed since the previous block
-	// the top has been probably been reached
+	// chain is reached.
 	if b.Sync {
-		if b.timeSinceLastBlock() > 120.0 {
-			return true
-		}
-		return false
+		return b.topReached()
 	}
 
 	// Normal mode: commit when min uncommited blocks are reached
@@ -351,6 +379,21 @@ func (b *BlockManager)commitRequired() bool {
 	return false
 }
 
+// Synced returns true when the manager is with the last blockchain block
+func (b *BlockManager) synced() bool {
+	
+	// Check all is committed
+	if b.commitTimerStartedFlag {
+		return false
+	}
+
+	if b.storageCache.UncommittedBlocks() > 0 {
+		return false
+	}
+
+	return b.topReached()
+}
+
 // Commit all cached blocks to storage
 func (b *BlockManager) commit() error {	
 	log.Print("Commit: ", b.storageCache.GetHeight())
@@ -358,7 +401,6 @@ func (b *BlockManager) commit() error {
 	if err != nil {
 		return err
 	}
-	b.lastTime = time.Now()
 	return nil
 }
 
@@ -375,12 +417,6 @@ func (b *BlockManager) getBalance(address string) (int64, error) {
 
 	return pendingBalance + storedBalance, nil
 }
-
-// Synced returns true when the manager is with the last blockchain block
-func (b *BlockManager) synced() bool {
-	return b.timeSinceLastBlock() > 10.0
-}
-
 
 // processBlockUpdate handles raw block updates from crawler
 func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (interfaces.BlockUpdate, error){
@@ -402,11 +438,6 @@ func (b *BlockManager) processBlockUpdate(update crawler.BlockUpdate) (interface
 
 // signalSubscribers
 func (b *BlockManager) signalSubscribers(update interfaces.BlockUpdate) {
-
-	// Only signal subscribers while not in sync mode
-	if b.Sync {
-		return
-	}
 
 	for subscriber, _ := range b.subscribers {
 		subscriber <- update
@@ -434,7 +465,7 @@ func (b *BlockManager) stopCommitTimer() {
 }
 
 // Block Manager routine handling block update and other requests
-func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
+func (b *BlockManager) managerRoutine() {
 
 	// Start logging routine for new blocks and backtracks
 	go Logger(b)
@@ -462,7 +493,7 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 				break
 
 			// New block available
-			case update := <- blockUpdateChan:
+			case update := <- b.crawlerUpdateChan:
 				blockUpdate, err := b.processBlockUpdate(update)
 				if err != nil {
 					log.Panic(err)
@@ -471,7 +502,8 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 
 				b.signalSubscribers(blockUpdate)
 
-				if b.commitRequired() && !b.commitTimerStartedFlag {
+				// Need to start a commit?
+				if !b.commitTimerStartedFlag && b.commitRequired() {
 					// Start commit timer
 					b.commitTimerStartedFlag = true
 					b.startCommitTimer()
@@ -480,19 +512,22 @@ func (b *BlockManager) managerRoutine(blockUpdateChan crawler.UpdateChan) {
 					b.signalSubscribers(interfaces.NewBlockUpdate(interfaces.OP_COMMIT, nil))
 				}
 
+				// Record last block arrival time
+				b.lastTime = time.Now()
+
 			// Commit timer expired
 			case <- b.commitTimer.C:
 				b.commitTimerStartedFlag = false
-				if b.commitRequired() {
-					b.commit()
-					b.signalSubscribers(interfaces.NewBlockUpdate(interfaces.OP_COMMIT_DONE, nil))
-				}
+				b.commit()
+				b.signalSubscribers(interfaces.NewBlockUpdate(interfaces.OP_COMMIT_DONE, nil))
+				b.lastTime = time.Now()
 
 			// Request balance for one address.
 			case req := <- b.BalanceChan:
 				balance, err := b.getBalance(req.Address)
 				req.Resp <- BalanceResponse{Balance: balance, Err: err}
 
+			// Request 
 			case ch := <- b.SyncChan:
 				ch <- b.synced()
 		}

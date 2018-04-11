@@ -13,7 +13,7 @@ func Logger(manager *BlockManager) {
 		block := update.Block
 		switch update.Class  {
 		case interfaces.OP_NEWBLOCK:
-			if block.Height % 1000 == 0 {
+			if block.Height % 100 == 0 {
 				log.Printf("New: %v\n", block)
 			}
 		case interfaces.OP_BACKTRACK:
