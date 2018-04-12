@@ -20,6 +20,21 @@ func GetTestDataPath() string {
 }
 
 
+// EqualStringSlices returns true if slice equals are equal an in same order
+func EqualStringSlices(slice1, slice2 []string) bool {
+	if len(slice1) != len(slice2) {
+		return false
+	}
+
+	for n, val := range slice1 {
+		if slice2[n] != val {
+			return false
+		}
+	}
+
+	return true
+}
+
 
 
 // Test item in storage
@@ -100,7 +115,9 @@ func TestValidConfigFile(t *testing.T) {
 	}
 
 	// Test bitcoind option values
-	if data["bitcoind.host"].(string) != "localhost:8000" {
+	bitcoindHosts := [...]string{"localhost:8000", "localhost:9000"}
+	
+	if !EqualStringSlices(data["bitcoind.hosts"].([]string), bitcoindHosts[:]) {
 		t.Errorf("bitcoind.host: Unexpected value")
 	}
 	if data["bitcoind.user"].(string) != "gobalance" {
@@ -178,8 +195,8 @@ func TestDefaultValuesConfigFile(t *testing.T) {
 	}
 
 	// Test bitcoind option values
-	if data["bitcoind.host"].(string) != DefaultBitcoindHost {
-		t.Errorf("bitcoind.host: Unexpected default value")
+	if !EqualStringSlices(data["bitcoind.hosts"].([]string), DefaultBitcoindHosts[:]) {
+		t.Errorf("bitcoind.host: Unexpected default value %v %v", data["bitcoind.hosts"], DefaultBitcoindHosts)
 	}
 	if data["bitcoind.user"] != "" {
 		t.Errorf("bitcoind.user: Unexpected defalut value")

@@ -41,7 +41,7 @@ Configuration file format is toml
 
 ### [bitcoind]
 
-**host (string)**: Bitcoind server hostname or ip address (i.e. "server1.unknown.com:8332")
+**hosts (string array)**: List of Bitcoind server hostname or ip address (i.e. ["server1.unknown.com:8332", ...])
 
 **user (string)**: Bitcoind service username
 
@@ -73,7 +73,7 @@ this way will shadow the values in the configuration file. The env options name 
 - **GOBALANCE_API_PORT**
 - **GOBALANCE_API_BIND**
 
-- **GOBALANCE_BITCOIND_HOST**
+- **GOBALANCE_BITCOIND_HOSTS**
 - **GOBALANCE_BITCOIND_USER**
 - **GOBALANCE_BITCOIND_PASS**
 - **GOBALANCE_BITCOIND_CHAIN**

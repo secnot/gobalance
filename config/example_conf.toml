@@ -21,7 +21,7 @@ port = 8080
 bind = "" 
 
 [bitcoind]
-host = "localhost:8332"
+host = ["localhost:8332"]
 user = "secnot"
 pass = "12345"
 

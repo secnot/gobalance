@@ -34,7 +34,7 @@ unreachable_marks = 10
 unreachable_period = 100
 
 [bitcoind]
-host = "localhost:8000"
+hosts = ["localhost:8000", "localhost:9000"]
 user = "gobalance"
 pass = "12345"
 chain = "testnet3"

@@ -2,7 +2,6 @@ package config
 
 const (
 	// Bitcoind
-	DefaultBitcoindHost     = "localhost:8332"
 	DefaultBitcoindMainnet  = "mainnet"
 	DefaultBitcoindTestnet3 = "testnet3"
 
@@ -26,8 +25,9 @@ const (
 	DefaultMode             = "full"
 )
 
-var DefaultPeersSeeds  = [...]string {}
-var AllowedPeerModes = [...]string {"full", "seed", "loadbalance"}
+var DefaultPeersSeeds    = [...]string {}
+var DefaultBitcoindHosts = [...]string {"localhost:8332"}
+var AllowedPeerModes     = [...]string {"full", "seed", "loadbalance"}
 
 
 type Option struct {
@@ -47,10 +47,10 @@ type Option struct {
 
 var Options = [] Option {
 	// bitcoind
-	{	name: "bitcoind.host",
-		val:  StringValidator(),
-		def:  DefaultBitcoindHost,
-		cast: CastString,
+	{	name: "bitcoind.hosts",
+		val:  StringSliceValidator(),
+		def:  DefaultBitcoindHosts[:],
+		cast: CastStringSlice,
 	},
 
 	{	name: "bitcoind.user",
