@@ -382,15 +382,19 @@ func (b *BlockManager)commitRequired() bool {
 // Synced returns true when the manager is with the last blockchain block
 func (b *BlockManager) synced() bool {
 	
-	// Check all is committed
-	if b.commitTimerStartedFlag {
-		return false
-	}
+	// When in sync mode the block manager is synced when the top of the
+	// blockchain is reached and all confirmed blocks commited
+	if b.Sync {
+		if b.commitTimerStartedFlag {
+			return false
+		}
 
-	if b.storageCache.UncommittedBlocks() > 0 {
-		return false
-	}
+		if b.storageCache.UncommittedBlocks() > 0 {
+			return false
+		}
+	}	
 
+	// In normal node it's only that the top of the blockchian has been reached
 	return b.topReached()
 }
 
