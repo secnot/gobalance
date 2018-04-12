@@ -60,8 +60,7 @@ func main() {
 	}
 
 	// Build rpcclient configuration using bitcoin core RPC server using HTTP POST mode.
-	bitcoindHosts := make([]string, 0)
-	bitcoindHosts = append(bitcoindHosts, conf["bitcoind.host"].(string)) // TODO: Use this until config accept  slice of bitcoind hosts
+	bitcoindHosts := conf["bitcoind.hosts"].([]string)
 	
 	rpcConf := make([]rpcclient.ConnConfig, 0)
 	for _, host := range bitcoindHosts {
@@ -197,7 +196,7 @@ func main() {
 	// Initial sync
 	///////////////
 	for {
-		time.Sleep(time.Second*10)
+		time.Sleep(time.Second*2)
 		if blockM.Synced() {
 			break
 		}
